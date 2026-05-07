@@ -27,6 +27,39 @@ bool flag_messaging_is_busy = false, flag_js_is_ready = false;
 GRect bounds;
 GPoint center;
 
+static GRect get_time_frame()
+{
+#ifdef PBL_RECT
+  return GRect(0, 53 * PBL_DISPLAY_HEIGHT / 168 + PBL_IF_HEIGHT_168_ELSE(0, 18), bounds.size.w, 70 * PBL_DISPLAY_HEIGHT / 168);
+#else
+  return GRect(0, 38, bounds.size.w, 70);
+#endif
+}
+
+static void set_time_frame(GRect frame)
+{
+  layer_set_frame(text_layer_get_layer(text_time), frame);
+
+  if (zoom_layer_time)
+  {
+    effect_layer_set_frame(zoom_layer_time, frame);
+  }
+}
+
+static void set_time_frame_for_unobstructed_area(GRect free_area)
+{
+  GRect frame = get_time_frame();
+  int16_t obstruction_height = bounds.size.h - free_area.size.h;
+
+  if (obstruction_height < 0)
+  {
+    obstruction_height = 0;
+  }
+
+  frame.origin.y -= obstruction_height * 15 / 100;
+  set_time_frame(frame);
+}
+
 static void invert_colors()
 {
   if (flag_invertColors == 1)
@@ -99,8 +132,7 @@ static void update_weather()
     dict_write_tuplet(iter, &dictionary[0]);
 
     flag_messaging_is_busy = true;
-    int msg_result = app_message_outbox_send(); // need to assign result for successfull call
-                                                // APP_LOG(APP_LOG_LEVEL_INFO, "**** I am inside 'update_weather()' message sent and result code = %d***", msg_result);
+    app_message_outbox_send();
   }
 }
 
@@ -126,7 +158,7 @@ static void show_icon(int w_icon)
 void tick_handler(struct tm *tick_time, TimeUnits units_changed)
 {
 
-  char format[5];
+  char format[6];
 
   // building format 12h/24h
   if (clock_is_24h_style())
@@ -305,6 +337,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
     case KEY_TEMPERATURE_FORMAT: // if temp format changed from F to C or back - need re-request weather
       // APP_LOG(APP_LOG_LEVEL_INFO, "***** I am inside of 'inbox_received_callback()' switching temp format");
       need_weather = 1;
+      break;
     case KEY_HOURS_MINUTES_SEPARATOR:
       if (t->value->int32 != flag_hoursMinutesSeparator)
       {
@@ -549,10 +582,15 @@ static void battery_handler(BatteryChargeState state)
 #endif
 }
 
-// adjusting time location when timeline quickview shows. (original Y was hardcoded at 53 now doing percentage minus 15% of obstructed area)
-void unobstructed_changed(GRect free_area, void *context)
+// adjusting time location when timeline quickview shows.
+void unobstructed_changed(AnimationProgress progress, void *context)
 {
-  layer_set_frame(text_layer_get_layer(text_time), GRect(0, bounds.size.h * 53 / 168 - (bounds.size.h - free_area.size.h) * 15 / 100, bounds.size.w, 70));
+  set_time_frame_for_unobstructed_area(layer_get_unobstructed_bounds(window_layer));
+}
+
+void unobstructed_did_change(void *context)
+{
+  set_time_frame_for_unobstructed_area(layer_get_unobstructed_bounds(window_layer));
 }
 
 void handle_init(void)
@@ -600,13 +638,13 @@ void handle_init(void)
 
 #ifdef PBL_RECT
   text_dow = create_text_layer(GRect(0, 30 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 31 * PBL_DISPLAY_HEIGHT / 168), bn_30, GTextAlignmentCenter);
-  text_time = create_text_layer(GRect(0, 53 * PBL_DISPLAY_HEIGHT / 168 + PBL_IF_HEIGHT_168_ELSE(0, 18), bounds.size.w, 70 * PBL_DISPLAY_HEIGHT / 168), bn_69, GTextAlignmentCenter);
+  text_time = create_text_layer(get_time_frame(), bn_69, GTextAlignmentCenter);
   text_date = create_text_layer(GRect(0, 129 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 27 * PBL_DISPLAY_HEIGHT / 168), bn_26, GTextAlignmentCenter);
   text_battery = create_text_layer(GRect(PBL_DISPLAY_WIDTH - 46 * PBL_DISPLAY_WIDTH / 144, 0, 43 * PBL_DISPLAY_WIDTH / 144, 21 * PBL_DISPLAY_HEIGHT / 168), bn_19, GTextAlignmentRight);
   text_temp = create_text_layer(GRect(3, 0, 80 * PBL_DISPLAY_WIDTH / 144, 21 * PBL_DISPLAY_HEIGHT / 168), bn_19, GTextAlignmentLeft);
 
   #if PBL_DISPLAY_HEIGHT != 168
-  zoom_layer_time = effect_layer_create(GRect(0, 53 * PBL_DISPLAY_HEIGHT / 168 + 18, bounds.size.w, 70 * PBL_DISPLAY_HEIGHT / 168));
+  zoom_layer_time = effect_layer_create(get_time_frame());
   effect_layer_add_effect(zoom_layer_time, effect_zoom, EL_ZOOM(139, 136)); 
   layer_add_child(window_layer, effect_layer_get_layer(zoom_layer_time));
 
@@ -616,7 +654,7 @@ void handle_init(void)
   #endif
 #else
   text_dow = create_text_layer(GRect(0, 23, bounds.size.w, 31), bn_20, GTextAlignmentCenter);
-  text_time = create_text_layer(GRect(0, 38, bounds.size.w, 70), bn_69, GTextAlignmentCenter);
+  text_time = create_text_layer(get_time_frame(), bn_69, GTextAlignmentCenter);
   text_date = create_text_layer(GRect(35, 111, 80, 27), bn_19, GTextAlignmentLeft);
   text_battery = create_text_layer(GRect(108, 111, 40, 21), bn_19, GTextAlignmentRight);
   text_temp = create_text_layer(GRect(48, 136, 41, 20), bn_19, GTextAlignmentRight);
@@ -636,7 +674,8 @@ void handle_init(void)
   app_message_open(500, 500);
 
   // to detect when timeline peek is shown
-  unobstructed_area_service_subscribe((UnobstructedAreaHandlers){.will_change = unobstructed_changed}, NULL);
+  unobstructed_area_service_subscribe((UnobstructedAreaHandlers){.change = unobstructed_changed, .did_change = unobstructed_did_change}, NULL);
+  set_time_frame_for_unobstructed_area(layer_get_unobstructed_bounds(window_layer));
 
   // reading stored value
   if (persist_exists(KEY_WEATHER_CODE))
