@@ -1,10 +1,12 @@
-var version = '2.30.0';
+var Clay = require('@rebble/clay');
+var clayConfig = require('./config.json');
+var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
+
 var current_settings;
 
 /*  ****************************************** Weather Section **************************************************** */
 
-
-// converts open-metri weather icon code to Yahoo weather icon code (to reuse current bitmap with icon set)
+// converts open-meteo weather icon code to Yahoo weather icon code (to reuse current bitmap with icon set)
 var OpenMetroCodeToYahooIcon = function (weather_code, is_day) {
   var yahoo_icon = 3200; //initially not defined
 
@@ -25,82 +27,37 @@ var OpenMetroCodeToYahooIcon = function (weather_code, is_day) {
   }
 
   return yahoo_icon;
-
 };
 
-
-//2016-03-25: Updated for Forecast.io
 function getWeather(coords) {
+  var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + coords.latitude +
+            '&longitude=' + coords.longitude +
+            '&current=temperature_2m,weather_code,is_day&temperature_unit=' +
+            (current_settings.temperatureFormat === 0 ? 'fahrenheit' : 'celsius');
 
-  var temperature;
-  var code;
-  var is_day;
-
-
-  var url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.latitude}&longitude=${coords.longitude}&current=temperature_2m,weather_code,is_day&temperature_unit=${current_settings.temperatureFormat === 0 ? 'fahrenheit' : 'celsius'}`;
-  //console.log ("++++ I am inside of 'getWeather()' preparing url:" + url);
-
-  // ** Send request to Yahoo
-  //Send request to Forecast.io
   var xhr = new XMLHttpRequest();
   xhr.onload = function () {
-
-    //console.log  ("++++ I am inside of 'getWeather()' callback. responseText is " + this.responseText);
-
     var json = JSON.parse(this.responseText);
+    var temperature = json.current.temperature_2m;
+    var code = json.current.weather_code;
+    var is_day = json.current.is_day;
 
-    temperature = json.current.temperature_2m;
-    console.log("++++ I am inside of 'getWeather()' callback. Temperature is " + temperature);
-
-    code = json.current.weather_code;
-    console.log("++++ I am inside of 'getWeather()' callback. Icon code: " + code);
-
-    is_day = json.current.is_day;
-    console.log("++++ I am inside of 'getWeather()' callback. Is day: " + is_day);
-
-    var dictionary = {
+    Pebble.sendAppMessage({
       'KEY_WEATHER_CODE': OpenMetroCodeToYahooIcon(code, is_day),
       'KEY_WEATHER_TEMP': temperature
-    };
-
-    // Send to Pebble
-    //console.log  ("++++ I am inside of 'getWeather()' callback. About to send message to Pebble");
-    Pebble.sendAppMessage(dictionary,
-      function (e) {
-        //console.log ("++++ I am inside of 'Pebble.sendAppMessage()' callback. Weather info sent to Pebble successfully!");
-      },
-      function (e) {
-        //console.log ("++++ I am inside of 'Pebble.sendAppMessage()' callback. Error sending weather info to Pebble!");
-      }
-    );
+    }, function () {}, function () {});
   };
-
-  xhr.onerror = function (e) {
-    //console.log("I am inside of 'getWeather()' ERROR: " + e.error);
-  };
-
+  xhr.onerror = function () {};
   xhr.open('GET', url);
   xhr.send();
 }
 
-
-
-// on location success querying woeid and getting weather
 function locationSuccess(pos) {
-
   getWeather(pos.coords);
-
 }
 
+function locationError() {}
 
-
-
-function locationError(err) {
-  //console.log ("++++ I am inside of 'locationError: Error requesting location!");
-}
-
-
-// Get Location lat+lon
 function getLocation() {
   navigator.geolocation.getCurrentPosition(
     locationSuccess,
@@ -109,117 +66,67 @@ function getLocation() {
   );
 }
 
+/*  ****************************************** Ready / AppMessage **************************************************** */
 
-// Listen for when the watchface is opened
-Pebble.addEventListener('ready',
-  function (e) {
+Pebble.addEventListener('ready', function () {
+  try {
+    current_settings = JSON.parse(localStorage.getItem('current_settings'));
+  } catch (ex) {
+    current_settings = null;
+  }
 
-    //reading current stored settings
-    try {
-      current_settings = JSON.parse(localStorage.getItem('current_settings'));
-    } catch (ex) {
-      current_settings = null;
-    }
-
-    if (current_settings === null) {
-      current_settings = {
-        temperatureFormat: 0,
-        hoursMinutesSeparator: 0,
-        dateFormat: 0,
-        invertColors: 0,
-        bluetoothAlert: 0, // new 2.18
-        locationService: 0,
-        woeid: version >= '2.22' ? '' : 0,
-        language: 255,
-        forecastIoApiKey: ''
-      };
-    }
-
-    //console.log ("++++ I am inside of 'Pebble.addEventListener('ready'): PebbleKit JS ready!");
-    var dictionary = {
-      "KEY_JSREADY": 1
+  if (current_settings === null) {
+    current_settings = {
+      temperatureFormat:     0,
+      hoursMinutesSeparator: 0,
+      dateFormat:            0,
+      bluetoothAlert:        0,
+      language:              255
     };
-
-    // Send to Pebble, so we can load units variable and send it back
-    //console.log ("++++ I am inside of 'Pebble.addEventListener('ready') about to send Ready message to phone");
-    Pebble.sendAppMessage(dictionary,
-      function (e) {
-        //console.log ("++++ I am inside of 'Pebble.sendAppMessage() callback: Ready notice sent to phone successfully!");
-      },
-      function (e) {
-        //console.log ("++++ I am inside of 'Pebble.sendAppMessage() callback: Error ready notice to Pebble!");
-      }
-    );
   }
-);
 
-// Listen for when an AppMessage is received
-Pebble.addEventListener('appmessage',
-  function (e) {
-    console.log("++++ I am inside of 'Pebble.addEventListener('appmessage'): AppMessage received");
+  Pebble.sendAppMessage({ 'KEY_JSREADY': 1 }, function () {}, function () {});
+});
 
-    console.log("++++ I am inside of 'Pebble.addEventListener('appmessage'): Requesting automatic location");
-    getLocation();  // for automatic location - get location
+Pebble.addEventListener('appmessage', function () {
+  getLocation();
+});
 
+/*  ****************************************** Config Section **************************************************** */
+
+Pebble.addEventListener('showConfiguration', function () {
+  Pebble.openURL(clay.generateUrl());
+});
+
+Pebble.addEventListener('webviewclosed', function (e) {
+  if (!e || !e.response) return;
+
+  var clayData = JSON.parse(decodeURIComponent(e.response));
+
+  function val(key) {
+    var v = clayData[key];
+    return parseInt((v && typeof v === 'object') ? v.value : v, 10);
   }
-);
 
-/*    ******************************************************************** Config Section ****************************************** */
+  var msg = {};
+  msg.KEY_HOURS_MINUTES_SEPARATOR = val('KEY_HOURS_MINUTES_SEPARATOR');
+  msg.KEY_DATE_FORMAT             = val('KEY_DATE_FORMAT');
+  msg.KEY_BLUETOOTH_ALERT         = val('KEY_BLUETOOTH_ALERT');
+  msg.KEY_LANGUAGE                = val('KEY_LANGUAGE');
 
-Pebble.addEventListener("showConfiguration",
-  function (e) {
-
-    //Load the remote config page
-
-    //Pebble.openURL("http://codecorner.galanter.net/pebble/clean_smart_config.htm?version=" + version);
-    Pebble.openURL("http://ygalanter.github.io/configs/clean_smart/clean_smart_config.htm?version=" + version); //YG 2016-03-15; moved config to github hosting
-
+  var newTempFormat = val('KEY_TEMPERATURE_FORMAT');
+  if (!current_settings || current_settings.temperatureFormat !== newTempFormat) {
+    msg.KEY_TEMPERATURE_FORMAT = newTempFormat;
   }
-);
 
-Pebble.addEventListener("webviewclosed",
-  function (e) {
+  current_settings = {
+    temperatureFormat:     newTempFormat,
+    hoursMinutesSeparator: val('KEY_HOURS_MINUTES_SEPARATOR'),
+    dateFormat:            val('KEY_DATE_FORMAT'),
+    bluetoothAlert:        val('KEY_BLUETOOTH_ALERT'),
+    language:              val('KEY_LANGUAGE')
+  };
+  localStorage.setItem('current_settings', JSON.stringify(current_settings));
 
-    if (e.response !== '') {
-
-      //console.log ("++++ I am inside of 'Pebble.addEventListener(webviewclosed). Resonse from WebView: " + decodeURIComponent(e.response));
-
-      //Get JSON dictionary
-      var settings = JSON.parse(decodeURIComponent(e.response));
-
-      var app_message_json = {};
-
-      // preparing app message
-      app_message_json.KEY_HOURS_MINUTES_SEPARATOR = settings.hoursMinutesSeparator;
-      app_message_json.KEY_DATE_FORMAT = settings.dateFormat;
-      app_message_json.KEY_INVERT_COLORS = settings.invertColors;
-      app_message_json.KEY_BLUETOOTH_ALERT = settings.bluetoothAlert; // new 2.18
-      app_message_json.KEY_LOCATION_SERVICE = settings.locationService;
-      app_message_json.KEY_WEATHER_INTERVAL = settings.weatherInterval;
-      app_message_json.KEY_LANGUAGE = settings.language;
-
-      // only storing and passing to pebble temperature format if it changed, because it will cause Pebble to reissue weather AJAX
-      // (or if forecast.io API Key was set/changed - then we need to update weather as well)
-      // (or if coordinates (former woeid) changed - then we need to update weather as well)
-      if (current_settings.temperatureFormat != settings.temperatureFormat ||
-        current_settings.forecastIoApiKey != settings.forecastIoApiKey ||
-        current_settings.woeid != settings.woeid) {
-        app_message_json.KEY_TEMPERATURE_FORMAT = settings.temperatureFormat;
-      }
-
-      // storing new settings
-      localStorage.setItem('current_settings', JSON.stringify(settings));
-      current_settings = settings;
-
-      //console.log ("++++ I am inside of 'Pebble.addEventListener(webviewclosed). About to send settings to the phone");
-      Pebble.sendAppMessage(app_message_json,
-        function (e) {
-          //console.log ("++++ I am inside of 'Pebble.addEventListener(webviewclosed) callback' Data sent to phone successfully!");
-        },
-        function (e) {
-          //console.log ("++++ I am inside of 'Pebble.addEventListener(webviewclosed) callback' Data sent to phone failed!");
-        }
-      );
-    }
-  }
-);
+  Pebble.sendAppMessage(msg, function () {}, function () {});
+});

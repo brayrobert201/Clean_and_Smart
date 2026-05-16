@@ -19,9 +19,9 @@ char s_dow[] = "WEDNESDAY     ";      // test
 char s_battery[] = "100%";            // test
 char s_temp[] = "-100°";
 
-EffectLayer *effect_layer, *zoom_layer_time, *zoom_layer_meteoicon;
+EffectLayer *zoom_layer_time, *zoom_layer_meteoicon;
 
-uint8_t flag_hoursMinutesSeparator, flag_dateFormat, flag_invertColors, flag_bluetooth_alert, flag_locationService, flag_weatherInterval, flag_language;
+uint8_t flag_hoursMinutesSeparator, flag_dateFormat, flag_bluetooth_alert, flag_language;
 bool flag_messaging_is_busy = false, flag_js_is_ready = false;
 
 GRect bounds;
@@ -60,18 +60,6 @@ static void set_time_frame_for_unobstructed_area(GRect free_area)
   set_time_frame(frame);
 }
 
-static void invert_colors()
-{
-  if (flag_invertColors == 1)
-  {
-    effect_layer_set_frame(effect_layer, bounds);
-  }
-  else
-  {
-    effect_layer_set_frame(effect_layer, GRectZero);
-  }
-}
-
 // // {*********************** THIS BLOCK PROPERLY RESTORES EFFECT LAYER AFTER A NOTIFICATION IS DISMISSED
 
 // // when app got focus - restore and refresh window - that makes it dynamic again
@@ -92,34 +80,11 @@ static void invert_colors()
 // }
 // // *********************** }
 
-static void toggle_weather_visibility()
-{
-
-  if (flag_locationService == 2)
-  { // if weather disabled - hide it and move battery to center
-
-    layer_set_hidden(text_layer_get_layer(text_temp), true);
-    layer_set_hidden(bitmap_layer_get_layer(temp_layer), true);
-#ifdef PBL_RECT
-    layer_set_frame(text_layer_get_layer(text_battery), GRect(49, 0, 43 * PBL_DISPLAY_WIDTH / 144, 21 * PBL_DISPLAY_HEIGHT / 168));
-#endif
-  }
-  else
-  { // otherwise show weather and move battery to edge
-
-    layer_set_hidden(text_layer_get_layer(text_temp), false);
-    layer_set_hidden(bitmap_layer_get_layer(temp_layer), false);
-#ifdef PBL_RECT
-    layer_set_frame(text_layer_get_layer(text_battery), GRect(PBL_DISPLAY_WIDTH - 46 * PBL_DISPLAY_WIDTH / 144, 0, 43 * PBL_DISPLAY_WIDTH / 144, 21 * PBL_DISPLAY_HEIGHT / 168));
-#endif
-  }
-}
-
 // calling for weather update
 static void update_weather()
 {
   // Only grab the weather if we can talk to phone AND weather is enabled AND currently message is not being processed and JS on phone is ready
-  if (flag_locationService != 2 && bluetooth_connection_service_peek() && !flag_messaging_is_busy && flag_js_is_ready)
+  if (bluetooth_connection_service_peek() && !flag_messaging_is_busy && flag_js_is_ready)
   {
     // APP_LOG(APP_LOG_LEVEL_INFO, "**** I am inside 'update_weather()' about to request weather from the phone ***");
 
@@ -188,7 +153,7 @@ void tick_handler(struct tm *tick_time, TimeUnits units_changed)
       text_layer_set_text(text_time, s_time);
     }
 
-    if (!(tick_time->tm_min % flag_weatherInterval) && (tick_time->tm_sec == 0))
+    if (!(tick_time->tm_min % 60) && (tick_time->tm_sec == 0))
     { // on configured weather interval change - update the weather
       // APP_LOG(APP_LOG_LEVEL_INFO, "**** I am inside 'tick_handler()' about to call 'update_weather();' at minute %d min on %d interval", tick_time->tm_min, flag_weatherInterval);
       update_weather();
@@ -362,33 +327,6 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         layer_mark_dirty(graphics_layer);
       }
       break;
-    case KEY_INVERT_COLORS:
-      if (t->value->int32 != flag_invertColors)
-      {
-        persist_write_int(KEY_INVERT_COLORS, t->value->int32);
-        flag_invertColors = t->value->int32;
-        invert_colors();
-      }
-      break;
-    case KEY_LOCATION_SERVICE:
-      if (t->value->int32 != flag_locationService)
-      {
-        persist_write_int(KEY_LOCATION_SERVICE, t->value->int32);
-        flag_locationService = t->value->int32;
-        toggle_weather_visibility();
-        need_weather = 1;
-        // APP_LOG(APP_LOG_LEVEL_INFO, "***** I am inside of 'inbox_received_callback()' location set to %d type", flag_locationService);
-      }
-      break;
-    case KEY_WEATHER_INTERVAL:
-      if (t->value->int32 != flag_weatherInterval && t->value->int32 != 1)
-      { // precaution, dunno why we get 1 here as well
-        persist_write_int(KEY_WEATHER_INTERVAL, t->value->int32);
-        flag_weatherInterval = t->value->int32;
-        need_weather = 1;
-        // APP_LOG(APP_LOG_LEVEL_INFO, "***** I am inside of 'inbox_received_callback()' Weather interval set to interval to %d min", flag_weatherInterval);
-      }
-      break;
     case KEY_LANGUAGE:
       if (t->value->int32 != flag_language)
       {
@@ -488,8 +426,6 @@ static void graphics_update_proc(Layer *layer, GContext *ctx)
   static GColor color;
 
 #ifdef PBL_COLOR
-
-  graphics_context_set_antialiased(ctx, flag_invertColors == 0); // if we're doing inversion - disable antialiasing
 
   // doing battery color in ranges with fall thru:
   //       100% - 50% - GColorGreen
@@ -628,11 +564,8 @@ void handle_init(void)
 
   flag_hoursMinutesSeparator = persist_exists(KEY_HOURS_MINUTES_SEPARATOR) ? persist_read_int(KEY_HOURS_MINUTES_SEPARATOR) : 0;
   flag_dateFormat = persist_exists(KEY_DATE_FORMAT) ? persist_read_int(KEY_DATE_FORMAT) : 0;
-  flag_invertColors = persist_exists(KEY_INVERT_COLORS) ? persist_read_int(KEY_INVERT_COLORS) : 0;
   flag_bluetooth_alert = persist_exists(KEY_BLUETOOTH_ALERT) ? persist_read_int(KEY_BLUETOOTH_ALERT) : 0;
-  flag_locationService = persist_exists(KEY_LOCATION_SERVICE) ? persist_read_int(KEY_LOCATION_SERVICE) : 0;
-  flag_weatherInterval = persist_exists(KEY_WEATHER_INTERVAL) ? persist_read_int(KEY_WEATHER_INTERVAL) : 60; // default weather update is 1 hour
-  flag_language = persist_exists(KEY_LANGUAGE) ? persist_read_int(KEY_LANGUAGE) : LANG_DEFAULT;              // default - language set by pebble
+  flag_language = persist_exists(KEY_LANGUAGE) ? persist_read_int(KEY_LANGUAGE) : LANG_DEFAULT;
 
   load_fonts();
 
@@ -685,13 +618,6 @@ void handle_init(void)
   else
     text_layer_set_text(text_temp, "...");
 
-  effect_layer = effect_layer_create(bounds);
-  effect_layer_add_effect(effect_layer, effect_invert_bw_only, NULL);
-  layer_add_child(window_layer, effect_layer_get_layer(effect_layer));
-
-  invert_colors();             // initial check for inverting colors;
-  toggle_weather_visibility(); // initial check for enable/disable weather
-
   // initial bluetooth check
   flag_bluetooth_alert = 0;
   bluetooth_connection_service_subscribe(bluetooth_handler);
@@ -722,7 +648,6 @@ void handle_deinit(void)
   gbitmap_destroy(meteoicon_current);
   bitmap_layer_destroy(temp_layer);
 
-  effect_layer_destroy(effect_layer);
   layer_destroy(graphics_layer);
 
   window_destroy(my_window);
