@@ -1,0 +1,90 @@
+[
+  {
+    "type": "heading",
+    "defaultValue": "Clean & Smart Settings"
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Time & Date" },
+      {
+        "type": "select",
+        "messageKey": "KEY_HOURS_MINUTES_SEPARATOR",
+        "label": "Hours and Minutes Separator",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Colon :", "value": "0" },
+          { "label": "Dot .",   "value": "1" }
+        ]
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_DATE_FORMAT",
+        "label": "Date Format",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Month Day Year", "value": "0" },
+          { "label": "Day Month Year", "value": "1" },
+          { "label": "YYYY-MM-DD",     "value": "2" }
+        ]
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_LANGUAGE",
+        "label": "Language",
+        "defaultValue": "255",
+        "options": [
+          { "label": "Default",     "value": "255" },
+          { "label": "Català",      "value": "5" },
+          { "label": "Italiano",    "value": "1" },
+          { "label": "Melayu",      "value": "6" },
+          { "label": "Nederlandse", "value": "3" },
+          { "label": "Norsk",       "value": "4" },
+          { "label": "Svenska",     "value": "0" },
+          { "label": "Русский",     "value": "2" },
+          { "label": "Polskie",     "value": "7" }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Weather" },
+      {
+        "type": "select",
+        "messageKey": "KEY_TEMPERATURE_FORMAT",
+        "label": "Temperature",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Fahrenheit", "value": "0" },
+          { "label": "Celsius",    "value": "1" }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Alerts" },
+      {
+        "type": "select",
+        "messageKey": "KEY_BLUETOOTH_ALERT",
+        "label": "Bluetooth Alert",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Disabled", "value": "0" },
+          { "label": "Silent",   "value": "1" },
+          { "label": "Weak",     "value": "2" },
+          { "label": "Normal",   "value": "3" },
+          { "label": "Strong",   "value": "4" },
+          { "label": "Double",   "value": "5" }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "submit",
+    "defaultValue": "Save Settings"
+  }
+]
