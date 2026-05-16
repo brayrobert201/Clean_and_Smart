@@ -103,7 +103,7 @@ Pebble.addEventListener('showConfiguration', function () {
 Pebble.addEventListener('webviewclosed', function (e) {
   if (!e || !e.response) return;
 
-  var clayData = JSON.parse(decodeURIComponent(e.response));
+  var clayData = clay.getSettings(e.response, false);
 
   function val(key) {
     var v = clayData[key];

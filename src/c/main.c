@@ -120,6 +120,27 @@ static void show_icon(int w_icon)
   bitmap_layer_set_bitmap(temp_layer, meteoicon_current);
 }
 
+static void tint_meteoicon() {
+  GColor *palette = gbitmap_get_palette(meteoicons_all);
+  if (!palette) return;
+
+  int num_colors;
+  switch (gbitmap_get_format(meteoicons_all)) {
+    case GBitmapFormat1BitPalette: num_colors = 2; break;
+    case GBitmapFormat2BitPalette: num_colors = 4; break;
+    case GBitmapFormat4BitPalette: num_colors = 16; break;
+    default: return;
+  }
+
+  GColor new_color = GColorFromHEX(flag_textColor);
+  for (int i = 0; i < num_colors; i++) {
+    if (!gcolor_equal(palette[i], GColorClear)) {
+      palette[i] = new_color;
+    }
+  }
+  layer_mark_dirty(bitmap_layer_get_layer(temp_layer));
+}
+
 // handling time
 void tick_handler(struct tm *tick_time, TimeUnits units_changed)
 {
@@ -342,6 +363,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       {
         persist_write_int(KEY_TEXT_COLOR, t->value->int32);
         flag_textColor = t->value->int32;
+        tint_meteoicon();
         text_layer_set_text_color(text_time,    GColorFromHEX(flag_textColor));
         text_layer_set_text_color(text_date,    GColorFromHEX(flag_textColor));
         text_layer_set_text_color(text_dow,     GColorFromHEX(flag_textColor));
@@ -589,6 +611,7 @@ void handle_init(void)
   flag_textColor = persist_exists(KEY_TEXT_COLOR) ? persist_read_int(KEY_TEXT_COLOR) : 0xFFFFFF;
   flag_bgColor   = persist_exists(KEY_BG_COLOR)   ? persist_read_int(KEY_BG_COLOR)   : 0x000000;
   window_set_background_color(my_window, GColorFromHEX(flag_bgColor));
+  tint_meteoicon();
 
   load_fonts();
 
