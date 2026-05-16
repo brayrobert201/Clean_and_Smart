@@ -10,6 +10,8 @@
 #define KEY_DATE_FORMAT 5
 #define KEY_BLUETOOTH_ALERT 7
 #define KEY_LANGUAGE 10
+#define KEY_TEXT_COLOR 11
+#define KEY_BG_COLOR 12
 
 #ifdef PBL_RECT
 #define ICON_WIDTH 40

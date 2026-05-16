@@ -22,6 +22,7 @@ char s_temp[] = "-100°";
 EffectLayer *zoom_layer_time, *zoom_layer_meteoicon;
 
 uint8_t flag_hoursMinutesSeparator, flag_dateFormat, flag_bluetooth_alert, flag_language;
+int flag_textColor, flag_bgColor;
 bool flag_messaging_is_busy = false, flag_js_is_ready = false;
 
 GRect bounds;
@@ -336,6 +337,26 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         need_time = 1;
       }
       break;
+    case KEY_TEXT_COLOR:
+      if (t->value->int32 != flag_textColor)
+      {
+        persist_write_int(KEY_TEXT_COLOR, t->value->int32);
+        flag_textColor = t->value->int32;
+        text_layer_set_text_color(text_time,    GColorFromHEX(flag_textColor));
+        text_layer_set_text_color(text_date,    GColorFromHEX(flag_textColor));
+        text_layer_set_text_color(text_dow,     GColorFromHEX(flag_textColor));
+        text_layer_set_text_color(text_battery, GColorFromHEX(flag_textColor));
+        text_layer_set_text_color(text_temp,    GColorFromHEX(flag_textColor));
+      }
+      break;
+    case KEY_BG_COLOR:
+      if (t->value->int32 != flag_bgColor)
+      {
+        persist_write_int(KEY_BG_COLOR, t->value->int32);
+        flag_bgColor = t->value->int32;
+        window_set_background_color(my_window, GColorFromHEX(flag_bgColor));
+      }
+      break;
     }
 
     // Look for next item
@@ -381,7 +402,7 @@ TextLayer *create_text_layer(GRect coords, GFont font, GTextAlignment align)
 {
   TextLayer *text_layer = text_layer_create(coords);
   text_layer_set_font(text_layer, font);
-  text_layer_set_text_color(text_layer, GColorWhite);
+  text_layer_set_text_color(text_layer, GColorFromHEX(flag_textColor));
   text_layer_set_background_color(text_layer, GColorClear);
   text_layer_set_text_alignment(text_layer, align);
   layer_add_child(window_layer, text_layer_get_layer(text_layer));
@@ -542,7 +563,6 @@ void handle_init(void)
   setlocale(LC_ALL, "");
 
   my_window = window_create();
-  window_set_background_color(my_window, GColorBlack);
   window_stack_push(my_window, true);
 
   window_layer = window_get_root_layer(my_window);
@@ -566,6 +586,9 @@ void handle_init(void)
   flag_dateFormat = persist_exists(KEY_DATE_FORMAT) ? persist_read_int(KEY_DATE_FORMAT) : 0;
   flag_bluetooth_alert = persist_exists(KEY_BLUETOOTH_ALERT) ? persist_read_int(KEY_BLUETOOTH_ALERT) : 0;
   flag_language = persist_exists(KEY_LANGUAGE) ? persist_read_int(KEY_LANGUAGE) : LANG_DEFAULT;
+  flag_textColor = persist_exists(KEY_TEXT_COLOR) ? persist_read_int(KEY_TEXT_COLOR) : 0xFFFFFF;
+  flag_bgColor   = persist_exists(KEY_BG_COLOR)   ? persist_read_int(KEY_BG_COLOR)   : 0x000000;
+  window_set_background_color(my_window, GColorFromHEX(flag_bgColor));
 
   load_fonts();
 

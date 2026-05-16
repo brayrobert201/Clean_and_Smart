@@ -84,6 +84,50 @@
     ]
   },
   {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Colors" },
+      {
+        "type": "color",
+        "messageKey": "KEY_TEXT_COLOR",
+        "label": "Text Color",
+        "defaultValue": "ffffff",
+        "sunlight": false,
+        "capabilities": ["COLOR"]
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_TEXT_COLOR",
+        "label": "Text Color",
+        "defaultValue": "16777215",
+        "options": [
+          { "label": "White", "value": "16777215" },
+          { "label": "Black", "value": "0" }
+        ],
+        "capabilities": ["BW"]
+      },
+      {
+        "type": "color",
+        "messageKey": "KEY_BG_COLOR",
+        "label": "Background Color",
+        "defaultValue": "000000",
+        "sunlight": false,
+        "capabilities": ["COLOR"]
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_BG_COLOR",
+        "label": "Background Color",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Black", "value": "0" },
+          { "label": "White", "value": "16777215" }
+        ],
+        "capabilities": ["BW"]
+      }
+    ]
+  },
+  {
     "type": "submit",
     "defaultValue": "Save Settings"
   }

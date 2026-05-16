@@ -81,7 +81,9 @@ Pebble.addEventListener('ready', function () {
       hoursMinutesSeparator: 0,
       dateFormat:            0,
       bluetoothAlert:        0,
-      language:              255
+      language:              255,
+      textColor:             16777215,
+      bgColor:               0
     };
   }
 
@@ -113,6 +115,8 @@ Pebble.addEventListener('webviewclosed', function (e) {
   msg.KEY_DATE_FORMAT             = val('KEY_DATE_FORMAT');
   msg.KEY_BLUETOOTH_ALERT         = val('KEY_BLUETOOTH_ALERT');
   msg.KEY_LANGUAGE                = val('KEY_LANGUAGE');
+  msg.KEY_TEXT_COLOR              = val('KEY_TEXT_COLOR');
+  msg.KEY_BG_COLOR                = val('KEY_BG_COLOR');
 
   var newTempFormat = val('KEY_TEMPERATURE_FORMAT');
   if (!current_settings || current_settings.temperatureFormat !== newTempFormat) {
@@ -124,7 +128,9 @@ Pebble.addEventListener('webviewclosed', function (e) {
     hoursMinutesSeparator: val('KEY_HOURS_MINUTES_SEPARATOR'),
     dateFormat:            val('KEY_DATE_FORMAT'),
     bluetoothAlert:        val('KEY_BLUETOOTH_ALERT'),
-    language:              val('KEY_LANGUAGE')
+    language:              val('KEY_LANGUAGE'),
+    textColor:             val('KEY_TEXT_COLOR'),
+    bgColor:               val('KEY_BG_COLOR')
   };
   localStorage.setItem('current_settings', JSON.stringify(current_settings));
 
