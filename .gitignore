@@ -1,3 +1,6 @@
 node_modules
 build
 *build
+
+# TfNSW API key and personal station config - copy from secrets.json.example
+src/pkjs/secrets.json

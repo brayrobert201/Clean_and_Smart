@@ -19,6 +19,11 @@ char s_dow[] = "WEDNESDAY     ";      // test
 char s_battery[] = "100%";            // test
 char s_temp[] = "-100°";
 
+static uint32_t train_departure = 0; // epoch seconds of next train, 0 = no data
+static uint8_t train_direction = 0;  // 0 = to work, 1 = to home
+static char s_train_platform[8];
+static char s_train[20];
+
 EffectLayer *zoom_layer_time, *zoom_layer_meteoicon;
 
 uint8_t flag_hoursMinutesSeparator, flag_dateFormat, flag_bluetooth_alert, flag_language;
@@ -81,13 +86,13 @@ static void set_time_frame_for_unobstructed_area(GRect free_area)
 // }
 // // *********************** }
 
-// calling for weather update
-static void update_weather()
+// asking the phone for fresh weather + train data
+static void request_phone_data()
 {
   // Only grab the weather if we can talk to phone AND weather is enabled AND currently message is not being processed and JS on phone is ready
   if (bluetooth_connection_service_peek() && !flag_messaging_is_busy && flag_js_is_ready)
   {
-    // APP_LOG(APP_LOG_LEVEL_INFO, "**** I am inside 'update_weather()' about to request weather from the phone ***");
+    // APP_LOG(APP_LOG_LEVEL_INFO, "**** I am inside 'request_phone_data()' about to request data from the phone ***");
 
     // need to have some data - sending dummy
     DictionaryIterator *iter;
@@ -141,6 +146,49 @@ static void tint_meteoicon() {
   layer_mark_dirty(bitmap_layer_get_layer(temp_layer));
 }
 
+// showing day of week (used when no train countdown is available)
+static void render_dow(struct tm *tick_time)
+{
+  if (flag_language != LANG_DEFAULT)
+  { // if custom language is set - pull from language array
+    text_layer_set_text(text_dow, LANG_DAY[flag_language][tick_time->tm_wday]);
+  }
+  else
+  {
+    strftime(s_dow, sizeof(s_dow), "%A", tick_time);
+    text_layer_set_text(text_dow, s_dow);
+  }
+}
+
+// showing countdown to the next train (falls back to day of week when no usable data)
+static void update_train_display(struct tm *tick_time)
+{
+  if (train_departure == 0)
+  {
+    render_dow(tick_time);
+    return;
+  }
+
+  int remaining = ((int)train_departure - (int)time(NULL) + 30) / 60;
+
+  if (remaining < 0)
+  { // train has left - drop stale data and ask the phone for the next one
+    train_departure = 0;
+    render_dow(tick_time);
+    request_phone_data();
+    return;
+  }
+
+  if (remaining > 180)
+  { // no sensible train within 3 hours (overnight/weekend gap)
+    render_dow(tick_time);
+    return;
+  }
+
+  snprintf(s_train, sizeof(s_train), "%s %dM %s", train_direction ? "HOME" : "WORK", remaining, s_train_platform);
+  text_layer_set_text(text_dow, s_train);
+}
+
 // handling time
 void tick_handler(struct tm *tick_time, TimeUnits units_changed)
 {
@@ -175,11 +223,13 @@ void tick_handler(struct tm *tick_time, TimeUnits units_changed)
       text_layer_set_text(text_time, s_time);
     }
 
-    if (!(tick_time->tm_min % 60) && (tick_time->tm_sec == 0))
-    { // on configured weather interval change - update the weather
-      // APP_LOG(APP_LOG_LEVEL_INFO, "**** I am inside 'tick_handler()' about to call 'update_weather();' at minute %d min on %d interval", tick_time->tm_min, flag_weatherInterval);
-      update_weather();
+    if (!(tick_time->tm_min % 15) && (tick_time->tm_sec == 0))
+    { // every 15 minutes - ask the phone for fresh train (and possibly weather) data
+      request_phone_data();
     }
+
+    // tick the train countdown down every minute
+    update_train_display(tick_time);
   }
 
   if (units_changed & DAY_UNIT)
@@ -226,15 +276,7 @@ void tick_handler(struct tm *tick_time, TimeUnits units_changed)
 
     text_layer_set_text(text_date, s_date);
 
-    if (flag_language != LANG_DEFAULT)
-    { // if custom language is set - pull from language array
-      text_layer_set_text(text_dow, LANG_DAY[flag_language][tick_time->tm_wday]);
-    }
-    else
-    {
-      strftime(s_dow, sizeof(s_dow), "%A", tick_time);
-      text_layer_set_text(text_dow, s_dow);
-    }
+    update_train_display(tick_time);
   }
 }
 
@@ -293,6 +335,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
 
   bool need_weather = 0;
   bool need_time = 0;
+  bool need_train_redraw = 0;
 
   // For all items
   while (t != NULL)
@@ -318,6 +361,24 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         flag_js_is_ready = true;
         need_weather = 1;
       }
+      break;
+
+    // train data keys
+    case KEY_TRAIN_DEPARTURE:
+      train_departure = t->value->uint32;
+      persist_write_int(KEY_TRAIN_DEPARTURE, t->value->int32);
+      need_train_redraw = 1;
+      break;
+    case KEY_TRAIN_PLATFORM:
+      strncpy(s_train_platform, t->value->cstring, sizeof(s_train_platform) - 1);
+      s_train_platform[sizeof(s_train_platform) - 1] = '\0';
+      persist_write_string(KEY_TRAIN_PLATFORM, s_train_platform);
+      need_train_redraw = 1;
+      break;
+    case KEY_TRAIN_DIRECTION:
+      train_direction = t->value->uint8;
+      persist_write_int(KEY_TRAIN_DIRECTION, t->value->uint8);
+      need_train_redraw = 1;
       break;
 
       // config keys
@@ -387,8 +448,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
 
   if (need_weather)
   {
-    // APP_LOG(APP_LOG_LEVEL_INFO, "***** I am inside of 'inbox_received_callback()' about to call 'update_weather();");
-    update_weather();
+    request_phone_data();
   }
 
   if (need_time)
@@ -399,6 +459,11 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
 
     // Manually call the tick handler
     tick_handler(t, MINUTE_UNIT | DAY_UNIT);
+  }
+  else if (need_train_redraw)
+  {
+    time_t temp = time(NULL);
+    update_train_display(localtime(&temp));
   }
 }
 
@@ -436,8 +501,7 @@ static void bluetooth_handler(bool state)
 
   if (state)
   {
-    // APP_LOG(APP_LOG_LEVEL_INFO, "***** I am inside of 'bluetooth_handler()' about to call 'update_weather();");
-    update_weather();
+    request_phone_data();
   }
 
   // if Bluetooth alert is totally disabled - exit from here
@@ -663,6 +727,18 @@ void handle_init(void)
     show_temperature(persist_read_int(KEY_WEATHER_TEMP));
   else
     text_layer_set_text(text_temp, "...");
+
+  // restoring train data - ignore a departure that has already passed
+  if (persist_exists(KEY_TRAIN_DEPARTURE))
+  {
+    uint32_t stored_departure = (uint32_t)persist_read_int(KEY_TRAIN_DEPARTURE);
+    if (stored_departure > (uint32_t)time(NULL))
+      train_departure = stored_departure;
+  }
+  if (persist_exists(KEY_TRAIN_PLATFORM))
+    persist_read_string(KEY_TRAIN_PLATFORM, s_train_platform, sizeof(s_train_platform));
+  if (persist_exists(KEY_TRAIN_DIRECTION))
+    train_direction = persist_read_int(KEY_TRAIN_DIRECTION);
 
   // initial bluetooth check
   flag_bluetooth_alert = 0;

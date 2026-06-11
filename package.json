@@ -23,7 +23,10 @@
             "KEY_TEXT_COLOR": 11,
             "KEY_TEMPERATURE_FORMAT": 3,
             "KEY_WEATHER_CODE": 0,
-            "KEY_WEATHER_TEMP": 1
+            "KEY_WEATHER_TEMP": 1,
+            "KEY_TRAIN_DEPARTURE": 13,
+            "KEY_TRAIN_PLATFORM": 14,
+            "KEY_TRAIN_DIRECTION": 15
         },
         "projectType": "native",
         "resources": {

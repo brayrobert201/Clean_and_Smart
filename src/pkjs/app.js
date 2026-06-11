@@ -2,7 +2,12 @@ var Clay = require('@rebble/clay');
 var clayConfig = require('./config.json');
 var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
 
+// TfNSW API key and station config, baked in at build time (gitignored;
+// copy secrets.json.example to secrets.json and fill in your values)
+var SECRETS = require('./secrets.json');
+
 var current_settings;
+var last_weather_fetch = 0;
 
 /*  ****************************************** Weather Section **************************************************** */
 
@@ -42,6 +47,8 @@ function getWeather(coords) {
     var code = json.current.weather_code;
     var is_day = json.current.is_day;
 
+    last_weather_fetch = Date.now();
+
     Pebble.sendAppMessage({
       'KEY_WEATHER_CODE': OpenMetroCodeToYahooIcon(code, is_day),
       'KEY_WEATHER_TEMP': temperature
@@ -64,6 +71,75 @@ function getLocation() {
     locationError,
     { timeout: 15000, maximumAge: 60000 }
   );
+}
+
+/*  ****************************************** Train Section **************************************************** */
+
+// fetches next train from the TfNSW Trip Planner API and sends a countdown payload to the watch
+function fetchTrain() {
+  var s = SECRETS || {};
+
+  if (!s.tfnswApiKey || !s.homeStopId || !s.workStopId) {
+    // not configured - tell the watch to fall back to day of week
+    Pebble.sendAppMessage({ 'KEY_TRAIN_DEPARTURE': 0 }, function () {}, function () {});
+    return;
+  }
+
+  var toWork = new Date().getHours() < (s.afternoonCutoffHour || 12);
+  var origin = toWork ? s.homeStopId : s.workStopId;
+  var dest   = toWork ? s.workStopId : s.homeStopId;
+
+  // trains + metro only (exclude light rail, bus, coach, ferry, school bus); no itdDate/itdTime = depart now
+  var url = 'https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON' +
+            '&coordOutputFormat=EPSG:4326&depArrMacro=dep' +
+            '&type_origin=any&name_origin=' + encodeURIComponent(origin) +
+            '&type_destination=any&name_destination=' + encodeURIComponent(dest) +
+            '&calcNumberOfTrips=3&excludedMeans=checkbox' +
+            '&exclMOT_4=1&exclMOT_5=1&exclMOT_7=1&exclMOT_9=1&exclMOT_11=1' +
+            '&TfNSWTR=true&version=10.2.1.42';
+
+  var xhr = new XMLHttpRequest();
+  xhr.onload = function () {
+    var dep = 0;
+    var platform = '';
+
+    try {
+      var journeys = JSON.parse(this.responseText).journeys || [];
+      var nowSec = Math.floor(Date.now() / 1000);
+
+      for (var j = 0; j < journeys.length && !dep; j++) {
+        var legs = journeys[j].legs || [];
+
+        for (var l = 0; l < legs.length; l++) {
+          var product = legs[l].transportation && legs[l].transportation.product;
+          var cls = product && product['class'];
+          if (cls !== 1 && cls !== 2) continue; // skip walking and other non-rail legs
+
+          var o = legs[l].origin;
+          var epoch = Math.floor(Date.parse(o.departureTimeEstimated || o.departureTimePlanned) / 1000);
+
+          if (epoch > nowSec) {
+            dep = epoch;
+            var m = /Platform (\w+)/.exec(o.disassembledName || o.name || '');
+            platform = m ? 'P' + m[1] : '';
+          }
+          break; // only the first rail leg of each journey matters
+        }
+      }
+    } catch (ex) {
+      dep = 0;
+    }
+
+    Pebble.sendAppMessage({
+      'KEY_TRAIN_DEPARTURE': dep,
+      'KEY_TRAIN_PLATFORM': platform,
+      'KEY_TRAIN_DIRECTION': toWork ? 0 : 1
+    }, function () {}, function () {});
+  };
+  xhr.onerror = function () {}; // silent: watch keeps counting down old data or falls back
+  xhr.open('GET', url);
+  xhr.setRequestHeader('Authorization', 'apikey ' + s.tfnswApiKey);
+  xhr.send();
 }
 
 /*  ****************************************** Ready / AppMessage **************************************************** */
@@ -91,7 +167,12 @@ Pebble.addEventListener('ready', function () {
 });
 
 Pebble.addEventListener('appmessage', function () {
-  getLocation();
+  // watch pings every 15 minutes: trains every time, weather only if it has gone stale
+  fetchTrain();
+
+  if (Date.now() - last_weather_fetch > 55 * 60 * 1000) {
+    getLocation();
+  }
 });
 
 /*  ****************************************** Config Section **************************************************** */
