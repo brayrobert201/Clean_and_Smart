@@ -129,6 +129,10 @@ for _ in $(seq 1 30); do
 done
 echo "pypkjs ready."
 
+# the firmware's bluetooth CommSession needs time to fully open before it will
+# accept a binary transfer; installing too eagerly times out in PutBytes
+sleep 30
+
 # hand the running emulator to pebble-tool
 cat > /tmp/pb-emulator.json <<EOF
 {"$PLATFORM": {"$VERSION": {
