@@ -819,9 +819,9 @@ static void update_usage_band(void)
   bool bars;
   if (usage_5h_reset == 0 && usage_7d_reset == 0)
     bars = false; // no data yet -> show date
-  else if ((usage_7d_pct >= 100 && usage_7d_reset) ||
-           (usage_5h_pct >= 100 && usage_5h_reset))
-    bars = true;  // limit takeover wins
+  else if ((usage_7d_pct >= 100 && usage_7d_reset && (uint32_t)now < usage_7d_reset) ||
+           (usage_5h_pct >= 100 && usage_5h_reset && (uint32_t)now < usage_5h_reset))
+    bars = true;  // limit takeover active (not yet past reset epoch)
   else if (usage_last_change && (uint32_t)now - usage_last_change < USAGE_FRESH_SECS)
     bars = true;  // quota changed in the last hour -> show bars
   else
@@ -865,7 +865,8 @@ static void draw_usage(GContext *ctx)
   GColor text_col = GColorFromHEX(flag_textColor);
 
   // weekly limit hit -> whole band becomes reset date/time (highest priority)
-  if (usage_7d_pct >= 100 && usage_7d_reset != 0)
+  // once the reset epoch passes, fall through to bars (stale data until phone confirms)
+  if (usage_7d_pct >= 100 && usage_7d_reset != 0 && (uint32_t)time(NULL) < usage_7d_reset)
   {
     time_t r = (time_t)usage_7d_reset;
     static char buf[24];
@@ -875,15 +876,17 @@ static void draw_usage(GContext *ctx)
   }
 
   // 5h session used up -> band becomes countdown to reset
+  // once reset epoch passes, fall through to bars (stale data until phone confirms)
   if (usage_5h_pct >= 100 && usage_5h_reset != 0)
   {
     int secs = (int)usage_5h_reset - (int)time(NULL);
-    if (secs < 0)
-      secs = 0;
-    static char buf[24];
-    snprintf(buf, sizeof(buf), "RESET IN %dH%02dM", secs / 3600, (secs % 3600) / 60);
-    draw_usage_takeover(ctx, buf, text_col);
-    return;
+    if (secs > 0)
+    {
+      static char buf[24];
+      snprintf(buf, sizeof(buf), "RESET IN %dH%02dM", secs / 3600, (secs % 3600) / 60);
+      draw_usage_takeover(ctx, buf, text_col);
+      return;
+    }
   }
 
   // normal: four taller bars in two pairs. Used (pace-coloured) above elapsed (cyan = clock).
