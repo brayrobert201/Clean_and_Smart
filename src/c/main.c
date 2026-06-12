@@ -857,12 +857,22 @@ static uint8_t pct_time_elapsed(uint32_t reset, uint32_t window)
   return 100 - pct_time_remaining(reset, window);
 }
 
+// advance last_reset by window_secs until the result is in the future
+static uint32_t next_reset_epoch(uint32_t last_reset, uint32_t window_secs)
+{
+  if (last_reset == 0 || window_secs == 0) return 0;
+  uint32_t now = (uint32_t)time(NULL);
+  if (last_reset > now) return last_reset;
+  uint32_t n = (now - last_reset) / window_secs + 1;
+  return last_reset + n * window_secs;
+}
+
 // format seconds-until-reset as "Xd Yh", "Xh Ym", or "Xm"
 static void fmt_countdown(char *buf, size_t n, uint32_t reset_epoch)
 {
-  if (reset_epoch == 0) { buf[0] = '\0'; return; }  // no data yet
+  if (reset_epoch == 0) { buf[0] = '\0'; return; }
   int secs = (int)reset_epoch - (int)time(NULL);
-  if (secs <= 0) { snprintf(buf, n, "new"); return; }  // window rolled, fresh soon
+  if (secs <= 0) { buf[0] = '\0'; return; }
   int h = secs / 3600, m = (secs % 3600) / 60, d = h / 24;
   h %= 24;
   if (d > 0)      snprintf(buf, n, "%dd%dh", d, h);
@@ -951,6 +961,10 @@ static void draw_usage(GContext *ctx)
 
   GColor text_col = GColorFromHEX(flag_textColor);
 
+  // extrapolate reset epochs forward if the stored value is in the past
+  uint32_t r5 = next_reset_epoch(usage_5h_reset, 5 * 3600);
+  uint32_t r7 = next_reset_epoch(usage_7d_reset, 7 * 86400);
+
   if (flag_usage_display_mode == 1)
   {
     // text mode: always show 2x2 pct+countdown grid, no takeovers
@@ -958,8 +972,8 @@ static void draw_usage(GContext *ctx)
     int hw = USAGE_BAR_W / 2;
     snprintf(b5, sizeof(b5), "5h:%d%%", (int)usage_5h_pct);
     snprintf(b7, sizeof(b7), "Wk:%d%%", (int)usage_7d_pct);
-    fmt_countdown(t5, sizeof(t5), usage_5h_reset);
-    fmt_countdown(t7, sizeof(t7), usage_7d_reset);
+    fmt_countdown(t5, sizeof(t5), r5);
+    fmt_countdown(t7, sizeof(t7), r7);
     graphics_context_set_text_color(ctx, text_col);
     graphics_draw_text(ctx, b5, bn_19, GRect(USAGE_BAR_X, USAGE_BAR_TOP,      hw, 30),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
@@ -974,19 +988,19 @@ static void draw_usage(GContext *ctx)
 
   // bar mode: takeovers when limits hit, then four bars
   // weekly limit hit -> whole band becomes reset date/time
-  if (usage_7d_pct >= 100 && usage_7d_reset != 0 && (uint32_t)time(NULL) < usage_7d_reset)
+  if (usage_7d_pct >= 100 && r7 != 0)
   {
-    time_t r = (time_t)usage_7d_reset;
+    time_t rt = (time_t)r7;
     static char buf[24];
-    strftime(buf, sizeof(buf), "WK %a %d %b %H:%M", localtime(&r));
+    strftime(buf, sizeof(buf), "WK %a %d %b %H:%M", localtime(&rt));
     draw_usage_takeover(ctx, buf, text_col);
     return;
   }
 
   // 5h session used up -> band becomes countdown to reset
-  if (usage_5h_pct >= 100 && usage_5h_reset != 0)
+  if (usage_5h_pct >= 100 && r5 != 0)
   {
-    int secs = (int)usage_5h_reset - (int)time(NULL);
+    int secs = (int)r5 - (int)time(NULL);
     if (secs > 0)
     {
       static char buf[24];
@@ -996,8 +1010,8 @@ static void draw_usage(GContext *ctx)
     }
   }
 
-  uint8_t e5 = pct_time_elapsed(usage_5h_reset, 5 * 3600);
-  uint8_t e7 = pct_time_elapsed(usage_7d_reset, 7 * 86400);
+  uint8_t e5 = pct_time_elapsed(r5, 5 * 3600);
+  uint8_t e7 = pct_time_elapsed(r7, 7 * 86400);
   GColor track = GColorDarkGray;
   GColor ref   = GColorCyan;
   int y0 = USAGE_BAR_TOP;
