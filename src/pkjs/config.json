@@ -213,21 +213,21 @@
         "type": "select",
         "messageKey": "KEY_USAGE_BAND_MODE",
         "label": "Band display",
-        "defaultValue": "0",
+        "defaultValue": 0,
         "options": [
-          { "label": "Smart (bars when active)", "value": "0" },
-          { "label": "Always show bars",         "value": "1" },
-          { "label": "Always alternate with date","value": "2" }
+          { "label": "Smart (bars when active)", "value": 0 },
+          { "label": "Always show bars",         "value": 1 },
+          { "label": "Always alternate with date","value": 2 }
         ]
       },
       {
         "type": "select",
         "messageKey": "KEY_USAGE_DISPLAY_MODE",
         "label": "Bar style",
-        "defaultValue": "0",
+        "defaultValue": 0,
         "options": [
-          { "label": "Progress bars",     "value": "0" },
-          { "label": "Raw percentages",   "value": "1" }
+          { "label": "Progress bars",     "value": 0 },
+          { "label": "Raw percentages",   "value": 1 }
         ]
       },
       {
@@ -260,11 +260,11 @@
         "type": "select",
         "messageKey": "KEY_USAGE_COLOR_GOOD",
         "label": "Bar colour: on-pace",
-        "defaultValue": "16777215",
+        "defaultValue": 16777215,
         "options": [
-          { "label": "White",      "value": "16777215" },
-          { "label": "Light gray", "value": "11184810" },
-          { "label": "Dark gray",  "value": "5592405"  }
+          { "label": "White",      "value": 16777215 },
+          { "label": "Light gray", "value": 11184810 },
+          { "label": "Dark gray",  "value": 5592405  }
         ],
         "capabilities": ["BW"]
       },
@@ -280,11 +280,11 @@
         "type": "select",
         "messageKey": "KEY_USAGE_COLOR_OVER",
         "label": "Bar colour: over-pace",
-        "defaultValue": "11184810",
+        "defaultValue": 11184810,
         "options": [
-          { "label": "White",      "value": "16777215" },
-          { "label": "Light gray", "value": "11184810" },
-          { "label": "Dark gray",  "value": "5592405"  }
+          { "label": "White",      "value": 16777215 },
+          { "label": "Light gray", "value": 11184810 },
+          { "label": "Dark gray",  "value": 5592405  }
         ],
         "capabilities": ["BW"]
       },
@@ -300,11 +300,11 @@
         "type": "select",
         "messageKey": "KEY_USAGE_COLOR_CRIT",
         "label": "Bar colour: critical",
-        "defaultValue": "5592405",
+        "defaultValue": 5592405,
         "options": [
-          { "label": "White",      "value": "16777215" },
-          { "label": "Light gray", "value": "11184810" },
-          { "label": "Dark gray",  "value": "5592405"  }
+          { "label": "White",      "value": 16777215 },
+          { "label": "Light gray", "value": 11184810 },
+          { "label": "Dark gray",  "value": 5592405  }
         ],
         "capabilities": ["BW"]
       }

@@ -1216,7 +1216,7 @@ void handle_init(void)
   app_message_register_outbox_sent(outbox_sent_callback);
 
   // Open AppMessage
-  app_message_open(500, 500);
+  app_message_open(app_message_inbox_size_maximum(), 512);
 
   // to detect when timeline peek is shown
   unobstructed_area_service_subscribe((UnobstructedAreaHandlers){.change = unobstructed_changed, .did_change = unobstructed_did_change}, NULL);
