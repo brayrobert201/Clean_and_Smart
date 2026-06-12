@@ -489,7 +489,7 @@ void load_fonts()
 
 static void inbox_received_callback(DictionaryIterator *iterator, void *context)
 {
-  // APP_LOG(APP_LOG_LEVEL_INFO, "***** I am inside of 'inbox_received_callback()' Message from the phone received!");
+  // APP_LOG(APP_LOG_LEVEL_INFO, "INBOX RECEIVED");
 
   // Read first item
   Tuple *t = dict_read_first(iterator);
@@ -772,7 +772,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
 
 static void inbox_dropped_callback(AppMessageResult reason, void *context)
 {
-  // APP_LOG(APP_LOG_LEVEL_ERROR, "____Message dropped!");
+  // APP_LOG(APP_LOG_LEVEL_ERROR, "INBOX DROPPED reason=%d", (int)reason);
 }
 
 static void outbox_failed_callback(DictionaryIterator *iterator, AppMessageResult reason, void *context)
@@ -875,8 +875,8 @@ static void update_usage_band(void)
   bool no_data = (usage_5h_reset == 0 && usage_7d_reset == 0);
   bool bars;
   switch (flag_usage_band_mode) {
-    case 1: // always bars
-      bars = !no_data;
+    case 1: // always bars - show regardless of data availability
+      bars = true;
       break;
     case 2: // always alternate
       bars = !no_data && (t->tm_min % 2) == 0;

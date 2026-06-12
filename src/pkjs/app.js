@@ -447,6 +447,13 @@ Pebble.addEventListener('webviewclosed', function (e) {
     return v ? 1 : 0;
   }
 
+  function color(key) {
+    var v = clayData[key];
+    v = (v && typeof v === 'object') ? v.value : v;
+    if (typeof v === 'number') return v;
+    return parseInt(String(v), 16);
+  }
+
   // visual settings -> watch
   var msg = {};
   msg.KEY_HOURS_MINUTES_SEPARATOR = val('KEY_HOURS_MINUTES_SEPARATOR');
@@ -455,6 +462,15 @@ Pebble.addEventListener('webviewclosed', function (e) {
   msg.KEY_LANGUAGE                = val('KEY_LANGUAGE');
   msg.KEY_TEXT_COLOR              = val('KEY_TEXT_COLOR');
   msg.KEY_BG_COLOR                = val('KEY_BG_COLOR');
+
+  // emery usage band display config -> watch
+  msg.KEY_USAGE_BAND_MODE    = val('KEY_USAGE_BAND_MODE');
+  msg.KEY_USAGE_DISPLAY_MODE = val('KEY_USAGE_DISPLAY_MODE');
+  msg.KEY_USAGE_PACE_OFFSET  = val('KEY_USAGE_PACE_OFFSET');
+  msg.KEY_USAGE_ABS_WARN     = val('KEY_USAGE_ABS_WARN');
+  msg.KEY_USAGE_COLOR_GOOD   = color('KEY_USAGE_COLOR_GOOD');
+  msg.KEY_USAGE_COLOR_OVER   = color('KEY_USAGE_COLOR_OVER');
+  msg.KEY_USAGE_COLOR_CRIT   = color('KEY_USAGE_COLOR_CRIT');
 
   var newTempFormat = val('KEY_TEMPERATURE_FORMAT');
   if (!current_settings || current_settings.temperatureFormat !== newTempFormat) {
