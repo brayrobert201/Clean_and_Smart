@@ -5,13 +5,13 @@
         "pebble-effect-layer": "^1.1.1"
     },
     "keywords": [],
-    "name": "clean-smart",
+    "name": "bobs-transport",
     "pebble": {
         "capabilities": [
             "location",
             "configurable"
         ],
-        "displayName": "Clean&Smart",
+        "displayName": "Bob's Transport",
         "enableMultiJS": true,
         "messageKeys": {
             "KEY_BLUETOOTH_ALERT": 7,
@@ -26,7 +26,22 @@
             "KEY_WEATHER_TEMP": 1,
             "KEY_TRAIN_DEPARTURE": 13,
             "KEY_TRAIN_PLATFORM": 14,
-            "KEY_TRAIN_DIRECTION": 15
+            "KEY_TRAIN_DIRECTION": 15,
+            "KEY_TRAIN_DEPARTURE2": 16,
+            "KEY_TRAIN_PLATFORM2": 17,
+            "KEY_TRAIN_EXPRESS": 18,
+            "KEY_PEAK1_START": 19,
+            "KEY_PEAK1_END": 20,
+            "KEY_PEAK2_START": 21,
+            "KEY_PEAK2_END": 22,
+            "KEY_PEAK_INTERVAL": 23,
+            "KEY_OFFPEAK_INTERVAL": 24,
+            "KEY_TFNSW_API_KEY": 30,
+            "KEY_HOME_STATION_NAME": 31,
+            "KEY_WORK_STATION_NAME": 32,
+            "KEY_DIRECTION_MODE": 33,
+            "KEY_CUTOFF_HOUR": 34,
+            "KEY_FASTEST_MARKER": 35
         },
         "projectType": "native",
         "resources": {
@@ -144,5 +159,5 @@
             "watchface": true
         }
     },
-    "version": "2.50"
+    "version": "1.0"
 }

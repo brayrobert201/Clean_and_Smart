@@ -6,7 +6,17 @@
 Window *my_window;
 Layer *window_layer;
 
+// emery (tall rect) shows two departure lines; 168-rect and chalk show one
+#if defined(PBL_RECT) && (PBL_DISPLAY_HEIGHT != 168)
+#define TWO_LINE_TRAIN 1
+#endif
+
+// compact direction glyphs (single guillemets, present in both Big Noodle TTFs)
+#define GLYPH_TO_WORK "\xE2\x80\xBA" // ›
+#define GLYPH_TO_HOME "\xE2\x80\xB9" // ‹
+
 TextLayer *text_time, *text_date, *text_dow, *text_battery, *text_temp;
+TextLayer *text_train1, *text_train2;
 Layer *graphics_layer;
 BitmapLayer *temp_layer;
 GBitmap *meteoicons_all, *meteoicon_current;
@@ -19,10 +29,18 @@ char s_dow[] = "WEDNESDAY     ";      // test
 char s_battery[] = "100%";            // test
 char s_temp[] = "-100°";
 
-static uint32_t train_departure = 0; // epoch seconds of next train, 0 = no data
-static uint8_t train_direction = 0;  // 0 = to work, 1 = to home
-static char s_train_platform[8];
-static char s_train[20];
+static uint32_t train_dep[2] = {0, 0}; // epoch seconds of next two trains, 0 = none
+static uint8_t train_direction = 0;    // 0 = to work (›), 1 = to home (‹)
+static uint8_t train_express = 0;      // bitmask: bit0 = dep1 fastest, bit1 = dep2 fastest
+static char s_train_platform[2][8];
+static char s_train1[24];
+#ifdef TWO_LINE_TRAIN
+static char s_train2[24];
+#endif
+
+// refresh schedule (defaults give the previous all-day 15-min behaviour until JS pushes config)
+static uint8_t peak1_start = 7, peak1_end = 9, peak2_start = 16, peak2_end = 19;
+static uint8_t peak_interval = 15, offpeak_interval = 15;
 
 EffectLayer *zoom_layer_time, *zoom_layer_meteoicon;
 
@@ -160,33 +178,106 @@ static void render_dow(struct tm *tick_time)
   }
 }
 
-// showing countdown to the next train (falls back to day of week when no usable data)
+// shifts the second departure into the first slot (used when slot 1 is empty or has passed)
+static void promote_train(void)
+{
+  train_dep[0] = train_dep[1];
+  strncpy(s_train_platform[0], s_train_platform[1], sizeof(s_train_platform[0]));
+  train_express >>= 1;
+  train_dep[1] = 0;
+  s_train_platform[1][0] = '\0';
+}
+
+// formats a departure epoch as a local clock time ("8:35"), respecting 12/24h + separator
+static void format_dep_time(uint32_t epoch, char *buf, size_t bufsize)
+{
+  time_t t = (time_t)epoch;
+  struct tm *lt = localtime(&t);
+
+  char fmt[6];
+  if (clock_is_24h_style())
+    strcpy(fmt, "%H:%M");
+  else
+    strcpy(fmt, "%l:%M"); // leading space in 12h mode
+  if (flag_hoursMinutesSeparator == 1)
+    fmt[2] = '.';
+
+  char tmp[8];
+  strftime(tmp, sizeof(tmp), fmt, lt);
+  char *p = (tmp[0] == ' ') ? &tmp[1] : tmp; // trim 12h leading space
+  strncpy(buf, p, bufsize - 1);
+  buf[bufsize - 1] = '\0';
+}
+
+// toggles between train lines and the day-of-week fallback (only meaningful on two-line displays)
+static void show_train_layers(bool train)
+{
+#ifdef TWO_LINE_TRAIN
+  layer_set_hidden(text_layer_get_layer(text_dow), train);
+  layer_set_hidden(text_layer_get_layer(text_train1), !train);
+  layer_set_hidden(text_layer_get_layer(text_train2), !train);
+#else
+  (void)train;
+#endif
+}
+
+// builds one departure line: "› 8:35 P1*"
+static void format_train_line(int slot, char *buf, size_t bufsize)
+{
+  char tbuf[8];
+  format_dep_time(train_dep[slot], tbuf, sizeof(tbuf));
+  snprintf(buf, bufsize, "%s %s %s%s",
+           train_direction ? GLYPH_TO_HOME : GLYPH_TO_WORK,
+           tbuf, s_train_platform[slot],
+           (train_express & (1 << slot)) ? "*" : "");
+}
+
+// shows the next train departure clock time(s), falling back to day of week when no usable data
 static void update_train_display(struct tm *tick_time)
 {
-  if (train_departure == 0)
+  int now = (int)time(NULL);
+
+  // promote a stranded second departure (e.g. first slot empty after restore)
+  if (train_dep[0] == 0 && train_dep[1] != 0)
+    promote_train();
+
+  // drop the first departure once it has passed and ask the phone for a fresh pair
+  if (train_dep[0] != 0 && ((int)train_dep[0] - now) < 0)
   {
-    render_dow(tick_time);
-    return;
-  }
-
-  int remaining = ((int)train_departure - (int)time(NULL) + 30) / 60;
-
-  if (remaining < 0)
-  { // train has left - drop stale data and ask the phone for the next one
-    train_departure = 0;
-    render_dow(tick_time);
+    promote_train();
     request_phone_data();
-    return;
   }
 
-  if (remaining > 180)
-  { // no sensible train within 3 hours (overnight/weekend gap)
+  bool usable = train_dep[0] != 0 && (((int)train_dep[0] - now + 30) / 60) <= 180;
+
+  if (!usable)
+  { // no sensible train (unconfigured / overnight / weekend gap)
+    show_train_layers(false);
     render_dow(tick_time);
     return;
   }
 
-  snprintf(s_train, sizeof(s_train), "%s %dM %s", train_direction ? "HOME" : "WORK", remaining, s_train_platform);
-  text_layer_set_text(text_dow, s_train);
+  show_train_layers(true);
+
+  format_train_line(0, s_train1, sizeof(s_train1));
+
+#ifdef TWO_LINE_TRAIN
+  text_layer_set_text(text_train1, s_train1);
+  if (train_dep[1] != 0)
+    format_train_line(1, s_train2, sizeof(s_train2));
+  else
+    s_train2[0] = '\0';
+  text_layer_set_text(text_train2, s_train2);
+#else
+  text_layer_set_text(text_dow, s_train1);
+#endif
+}
+
+// true during either configured commuter peak window
+static bool in_peak(struct tm *t)
+{
+  return (t->tm_hour >= peak1_start && t->tm_hour < peak1_end) ||
+         (t->tm_hour >= peak2_start && t->tm_hour < peak2_end);
 }
 
 // handling time
@@ -223,12 +314,15 @@ void tick_handler(struct tm *tick_time, TimeUnits units_changed)
       text_layer_set_text(text_time, s_time);
     }
 
-    if (!(tick_time->tm_min % 15) && (tick_time->tm_sec == 0))
-    { // every 15 minutes - ask the phone for fresh train (and possibly weather) data
+    uint8_t interval = in_peak(tick_time) ? peak_interval : offpeak_interval;
+    if (interval == 0)
+      interval = 15; // guard against a bad/unset config value
+    if (!(tick_time->tm_min % interval))
+    { // on the configured cadence - ask the phone for fresh train (and possibly weather) data
       request_phone_data();
     }
 
-    // tick the train countdown down every minute
+    // refresh the departure display every minute (clock crossing a departure triggers a shift)
     update_train_display(tick_time);
   }
 
@@ -365,20 +459,62 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
 
     // train data keys
     case KEY_TRAIN_DEPARTURE:
-      train_departure = t->value->uint32;
+      train_dep[0] = t->value->uint32;
       persist_write_int(KEY_TRAIN_DEPARTURE, t->value->int32);
       need_train_redraw = 1;
       break;
     case KEY_TRAIN_PLATFORM:
-      strncpy(s_train_platform, t->value->cstring, sizeof(s_train_platform) - 1);
-      s_train_platform[sizeof(s_train_platform) - 1] = '\0';
-      persist_write_string(KEY_TRAIN_PLATFORM, s_train_platform);
+      strncpy(s_train_platform[0], t->value->cstring, sizeof(s_train_platform[0]) - 1);
+      s_train_platform[0][sizeof(s_train_platform[0]) - 1] = '\0';
+      persist_write_string(KEY_TRAIN_PLATFORM, s_train_platform[0]);
       need_train_redraw = 1;
       break;
     case KEY_TRAIN_DIRECTION:
       train_direction = t->value->uint8;
       persist_write_int(KEY_TRAIN_DIRECTION, t->value->uint8);
       need_train_redraw = 1;
+      break;
+    case KEY_TRAIN_DEPARTURE2:
+      train_dep[1] = t->value->uint32;
+      persist_write_int(KEY_TRAIN_DEPARTURE2, t->value->int32);
+      need_train_redraw = 1;
+      break;
+    case KEY_TRAIN_PLATFORM2:
+      strncpy(s_train_platform[1], t->value->cstring, sizeof(s_train_platform[1]) - 1);
+      s_train_platform[1][sizeof(s_train_platform[1]) - 1] = '\0';
+      persist_write_string(KEY_TRAIN_PLATFORM2, s_train_platform[1]);
+      need_train_redraw = 1;
+      break;
+    case KEY_TRAIN_EXPRESS:
+      train_express = t->value->uint8;
+      persist_write_int(KEY_TRAIN_EXPRESS, t->value->uint8);
+      need_train_redraw = 1;
+      break;
+
+    // refresh-schedule keys (watch drives the polling cadence)
+    case KEY_PEAK1_START:
+      peak1_start = t->value->uint8;
+      persist_write_int(KEY_PEAK1_START, t->value->uint8);
+      break;
+    case KEY_PEAK1_END:
+      peak1_end = t->value->uint8;
+      persist_write_int(KEY_PEAK1_END, t->value->uint8);
+      break;
+    case KEY_PEAK2_START:
+      peak2_start = t->value->uint8;
+      persist_write_int(KEY_PEAK2_START, t->value->uint8);
+      break;
+    case KEY_PEAK2_END:
+      peak2_end = t->value->uint8;
+      persist_write_int(KEY_PEAK2_END, t->value->uint8);
+      break;
+    case KEY_PEAK_INTERVAL:
+      peak_interval = t->value->uint8;
+      persist_write_int(KEY_PEAK_INTERVAL, t->value->uint8);
+      break;
+    case KEY_OFFPEAK_INTERVAL:
+      offpeak_interval = t->value->uint8;
+      persist_write_int(KEY_OFFPEAK_INTERVAL, t->value->uint8);
       break;
 
       // config keys
@@ -430,6 +566,10 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         text_layer_set_text_color(text_dow,     GColorFromHEX(flag_textColor));
         text_layer_set_text_color(text_battery, GColorFromHEX(flag_textColor));
         text_layer_set_text_color(text_temp,    GColorFromHEX(flag_textColor));
+#ifdef TWO_LINE_TRAIN
+        text_layer_set_text_color(text_train1,  GColorFromHEX(flag_textColor));
+        text_layer_set_text_color(text_train2,  GColorFromHEX(flag_textColor));
+#endif
       }
       break;
     case KEY_BG_COLOR:
@@ -636,6 +776,15 @@ void unobstructed_did_change(void *context)
   set_time_frame_for_unobstructed_area(layer_get_unobstructed_bounds(window_layer));
 }
 
+#ifdef PBL_PLATFORM_EMERY
+// experimental: tapping the departures area (top band) forces a fresh fetch from the phone
+static void touch_handler(const TouchEvent *event, void *context)
+{
+  if (event->type == TouchEvent_Touchdown && event->y < 90)
+    request_phone_data();
+}
+#endif
+
 void handle_init(void)
 {
 
@@ -687,8 +836,14 @@ void handle_init(void)
   text_temp = create_text_layer(GRect(3, 0, 80 * PBL_DISPLAY_WIDTH / 144, 21 * PBL_DISPLAY_HEIGHT / 168), bn_19, GTextAlignmentLeft);
 
   #if PBL_DISPLAY_HEIGHT != 168
+  // two smaller departure lines fill the band between the battery bar and the time
+  text_train1 = create_text_layer(GRect(0, 27 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 20 * PBL_DISPLAY_HEIGHT / 168), bn_19, GTextAlignmentCenter);
+  text_train2 = create_text_layer(GRect(0, 46 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 20 * PBL_DISPLAY_HEIGHT / 168), bn_19, GTextAlignmentCenter);
+  layer_set_hidden(text_layer_get_layer(text_train1), true);
+  layer_set_hidden(text_layer_get_layer(text_train2), true);
+
   zoom_layer_time = effect_layer_create(get_time_frame());
-  effect_layer_add_effect(zoom_layer_time, effect_zoom, EL_ZOOM(139, 136)); 
+  effect_layer_add_effect(zoom_layer_time, effect_zoom, EL_ZOOM(139, 136));
   layer_add_child(window_layer, effect_layer_get_layer(zoom_layer_time));
 
   zoom_layer_meteoicon = effect_layer_create(GRect(51 * PBL_DISPLAY_WIDTH / 144, 1, 41 * PBL_DISPLAY_WIDTH / 144, 20 * PBL_DISPLAY_HEIGHT / 168));
@@ -728,17 +883,36 @@ void handle_init(void)
   else
     text_layer_set_text(text_temp, "...");
 
-  // restoring train data - ignore a departure that has already passed
+  // restoring train data - ignore departures that have already passed
+  uint32_t now32 = (uint32_t)time(NULL);
   if (persist_exists(KEY_TRAIN_DEPARTURE))
   {
-    uint32_t stored_departure = (uint32_t)persist_read_int(KEY_TRAIN_DEPARTURE);
-    if (stored_departure > (uint32_t)time(NULL))
-      train_departure = stored_departure;
+    uint32_t d = (uint32_t)persist_read_int(KEY_TRAIN_DEPARTURE);
+    if (d > now32)
+      train_dep[0] = d;
+  }
+  if (persist_exists(KEY_TRAIN_DEPARTURE2))
+  {
+    uint32_t d = (uint32_t)persist_read_int(KEY_TRAIN_DEPARTURE2);
+    if (d > now32)
+      train_dep[1] = d;
   }
   if (persist_exists(KEY_TRAIN_PLATFORM))
-    persist_read_string(KEY_TRAIN_PLATFORM, s_train_platform, sizeof(s_train_platform));
+    persist_read_string(KEY_TRAIN_PLATFORM, s_train_platform[0], sizeof(s_train_platform[0]));
+  if (persist_exists(KEY_TRAIN_PLATFORM2))
+    persist_read_string(KEY_TRAIN_PLATFORM2, s_train_platform[1], sizeof(s_train_platform[1]));
+  if (persist_exists(KEY_TRAIN_EXPRESS))
+    train_express = persist_read_int(KEY_TRAIN_EXPRESS);
   if (persist_exists(KEY_TRAIN_DIRECTION))
     train_direction = persist_read_int(KEY_TRAIN_DIRECTION);
+
+  // restoring refresh schedule
+  if (persist_exists(KEY_PEAK1_START))      peak1_start = persist_read_int(KEY_PEAK1_START);
+  if (persist_exists(KEY_PEAK1_END))        peak1_end = persist_read_int(KEY_PEAK1_END);
+  if (persist_exists(KEY_PEAK2_START))      peak2_start = persist_read_int(KEY_PEAK2_START);
+  if (persist_exists(KEY_PEAK2_END))        peak2_end = persist_read_int(KEY_PEAK2_END);
+  if (persist_exists(KEY_PEAK_INTERVAL))    peak_interval = persist_read_int(KEY_PEAK_INTERVAL);
+  if (persist_exists(KEY_OFFPEAK_INTERVAL)) offpeak_interval = persist_read_int(KEY_OFFPEAK_INTERVAL);
 
   // initial bluetooth check
   flag_bluetooth_alert = 0;
@@ -747,6 +921,11 @@ void handle_init(void)
   flag_bluetooth_alert = persist_exists(KEY_BLUETOOTH_ALERT) ? persist_read_int(KEY_BLUETOOTH_ALERT) : 1;
 
   tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
+
+#ifdef PBL_PLATFORM_EMERY
+  if (touch_service_is_enabled())
+    touch_service_subscribe(touch_handler, NULL);
+#endif
 
   // Get a time structure so that the face doesn't start blank
   time_t temp = time(NULL);
@@ -765,6 +944,10 @@ void handle_deinit(void)
   text_layer_destroy(text_dow);
   text_layer_destroy(text_battery);
   text_layer_destroy(text_temp);
+#ifdef TWO_LINE_TRAIN
+  text_layer_destroy(text_train1);
+  text_layer_destroy(text_train2);
+#endif
 
   gbitmap_destroy(meteoicons_all);
   gbitmap_destroy(meteoicon_current);
@@ -778,6 +961,9 @@ void handle_deinit(void)
   battery_state_service_unsubscribe();
   bluetooth_connection_service_unsubscribe();
   unobstructed_area_service_unsubscribe();
+#ifdef PBL_PLATFORM_EMERY
+  touch_service_unsubscribe();
+#endif
   //   app_focus_service_unsubscribe();
 }
 

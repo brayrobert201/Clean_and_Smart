@@ -1,7 +1,7 @@
 [
   {
     "type": "heading",
-    "defaultValue": "Clean & Smart Settings"
+    "defaultValue": "Bob's Transport Settings"
   },
   {
     "type": "section",
@@ -79,6 +79,120 @@
           { "label": "Normal",   "value": "3" },
           { "label": "Strong",   "value": "4" },
           { "label": "Double",   "value": "5" }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Sydney Trains" },
+      {
+        "type": "input",
+        "messageKey": "KEY_TFNSW_API_KEY",
+        "label": "TfNSW API Key",
+        "defaultValue": "",
+        "description": "Free key from opendata.transport.nsw.gov.au. Leave blank to show the day of week.",
+        "attributes": { "placeholder": "apikey", "type": "text" }
+      },
+      {
+        "type": "input",
+        "messageKey": "KEY_HOME_STATION_NAME",
+        "label": "Home Station",
+        "defaultValue": "",
+        "description": "Type a station name (e.g. Gordon) or a stop ID.",
+        "attributes": { "placeholder": "e.g. Gordon", "type": "text" }
+      },
+      {
+        "type": "input",
+        "messageKey": "KEY_WORK_STATION_NAME",
+        "label": "Work Station",
+        "defaultValue": "",
+        "attributes": { "placeholder": "e.g. Wynyard", "type": "text" }
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_DIRECTION_MODE",
+        "label": "Direction",
+        "defaultValue": "0",
+        "options": [
+          { "label": "By time of day", "value": "0" },
+          { "label": "Alternate each refresh", "value": "1" }
+        ]
+      },
+      {
+        "type": "slider",
+        "messageKey": "KEY_CUTOFF_HOUR",
+        "label": "Switch to homeward after (hour)",
+        "description": "Used in 'By time of day' mode.",
+        "defaultValue": 12,
+        "min": 0,
+        "max": 23,
+        "step": 1
+      },
+      {
+        "type": "toggle",
+        "messageKey": "KEY_FASTEST_MARKER",
+        "label": "Mark fastest train with *",
+        "defaultValue": true
+      },
+      {
+        "type": "slider",
+        "messageKey": "KEY_PEAK1_START",
+        "label": "Morning peak start (hour)",
+        "defaultValue": 7,
+        "min": 0,
+        "max": 23,
+        "step": 1
+      },
+      {
+        "type": "slider",
+        "messageKey": "KEY_PEAK1_END",
+        "label": "Morning peak end (hour)",
+        "defaultValue": 9,
+        "min": 0,
+        "max": 23,
+        "step": 1
+      },
+      {
+        "type": "slider",
+        "messageKey": "KEY_PEAK2_START",
+        "label": "Evening peak start (hour)",
+        "defaultValue": 16,
+        "min": 0,
+        "max": 23,
+        "step": 1
+      },
+      {
+        "type": "slider",
+        "messageKey": "KEY_PEAK2_END",
+        "label": "Evening peak end (hour)",
+        "defaultValue": 19,
+        "min": 0,
+        "max": 23,
+        "step": 1
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_PEAK_INTERVAL",
+        "label": "Peak refresh (minutes)",
+        "defaultValue": "5",
+        "options": [
+          { "label": "3", "value": "3" },
+          { "label": "5", "value": "5" },
+          { "label": "10", "value": "10" },
+          { "label": "15", "value": "15" }
+        ]
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_OFFPEAK_INTERVAL",
+        "label": "Off-peak refresh (minutes)",
+        "defaultValue": "15",
+        "options": [
+          { "label": "15", "value": "15" },
+          { "label": "30", "value": "30" },
+          { "label": "60", "value": "60" }
         ]
       }
     ]
