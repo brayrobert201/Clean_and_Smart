@@ -70,7 +70,7 @@ GPoint center;
 static GRect get_time_frame()
 {
 #ifdef PBL_RECT
-  return GRect(0, 53 * PBL_DISPLAY_HEIGHT / 168 + PBL_IF_HEIGHT_168_ELSE(0, 18), bounds.size.w, 70 * PBL_DISPLAY_HEIGHT / 168);
+  return GRect(0, 53 * PBL_DISPLAY_HEIGHT / 168 + PBL_IF_HEIGHT_168_ELSE(0, 6), bounds.size.w, 70 * PBL_DISPLAY_HEIGHT / 168);
 #else
   return GRect(0, 38, bounds.size.w, 70);
 #endif
@@ -778,6 +778,22 @@ static uint8_t pct_time_remaining(uint32_t reset, uint32_t window)
   return (uint8_t)(rem * 100 / window);
 }
 
+// fraction (0-100) of a window already elapsed (inverse of remaining)
+static uint8_t pct_time_elapsed(uint32_t reset, uint32_t window)
+{
+  return 100 - pct_time_remaining(reset, window);
+}
+
+// colour a "used" bar by how it tracks the clock: green under pace, amber over, red critical
+static GColor usage_pace_color(uint8_t used, uint8_t elapsed)
+{
+  if (used >= 90)
+    return GColorRed; // near the wall regardless of pace
+  if (used > elapsed + 3)
+    return GColorChromeYellow; // burning faster than the clock
+  return GColorGreen;          // on or under pace
+}
+
 // one horizontal bar: dim full-width track + bright fill scaled by pct
 static void draw_usage_bar(GContext *ctx, int idx, uint8_t pct, GColor fill, GColor track)
 {
@@ -833,12 +849,18 @@ static void draw_usage(GContext *ctx)
     return;
   }
 
-  // normal: four bars (used / time-left for the 5h block, then used / time-left for the week)
+  // normal: four bars. Each period is used (pace-coloured) directly above elapsed (cyan =
+  // the clock), so used-bar longer than the cyan bar below it = burning faster than time.
   GColor track = GColorDarkGray;
-  draw_usage_bar(ctx, 0, usage_5h_pct, usage_5h_pct >= 90 ? GColorRed : text_col, track);
-  draw_usage_bar(ctx, 1, pct_time_remaining(usage_5h_reset, 5 * 3600), GColorCyan, track);
-  draw_usage_bar(ctx, 2, usage_7d_pct, usage_7d_pct >= 90 ? GColorRed : text_col, track);
-  draw_usage_bar(ctx, 3, pct_time_remaining(usage_7d_reset, 7 * 86400), GColorCyan, track);
+  GColor ref = GColorCyan; // elapsed reference = how far the clock has moved
+
+  uint8_t e5 = pct_time_elapsed(usage_5h_reset, 5 * 3600);
+  uint8_t e7 = pct_time_elapsed(usage_7d_reset, 7 * 86400);
+
+  draw_usage_bar(ctx, 0, usage_5h_pct, usage_pace_color(usage_5h_pct, e5), track); // 5h used
+  draw_usage_bar(ctx, 1, e5, ref, track);                                          // 5h elapsed
+  draw_usage_bar(ctx, 2, usage_7d_pct, usage_pace_color(usage_7d_pct, e7), track); // wk used
+  draw_usage_bar(ctx, 3, e7, ref, track);                                          // wk elapsed
 
   // stale marker: a small dim square at the right edge of the band
   if (usage_stale)
@@ -1025,7 +1047,7 @@ void handle_init(void)
   text_time = create_text_layer(get_time_frame(), bn_69, GTextAlignmentCenter);
 #if PBL_DISPLAY_HEIGHT != 168
   // emery: raise the date to make room for the Claude usage bars below it
-  text_date = create_text_layer(GRect(0, 166, bounds.size.w, 30), bn_26, GTextAlignmentCenter);
+  text_date = create_text_layer(GRect(0, 150, bounds.size.w, 30), bn_26, GTextAlignmentCenter);
 #else
   text_date = create_text_layer(GRect(0, 129 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 27 * PBL_DISPLAY_HEIGHT / 168), bn_26, GTextAlignmentCenter);
 #endif
