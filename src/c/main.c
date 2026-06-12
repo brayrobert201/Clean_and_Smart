@@ -56,6 +56,11 @@ static uint8_t peak_interval = 15, offpeak_interval = 15;
 static uint8_t usage_5h_pct = 0, usage_7d_pct = 0;
 static uint32_t usage_5h_reset = 0, usage_7d_reset = 0;
 static bool usage_stale = false;
+static uint32_t usage_last_change = 0;  // epoch when quota pct last changed
+static bool usage_band_shows_bars = false;
+#define PERSIST_USAGE_LAST_CHANGE 46
+#define USAGE_FRESH_SECS 3600           // show bars whenever quota changed in the last hour
+static void update_usage_band(void);    // forward declaration (defined near draw_usage)
 #endif
 
 EffectLayer *zoom_layer_time, *zoom_layer_meteoicon;
@@ -370,8 +375,7 @@ void tick_handler(struct tm *tick_time, TimeUnits units_changed)
     update_train_display(tick_time);
 
 #ifdef PBL_PLATFORM_EMERY
-    // redraw so the usage "time remaining" bars / reset countdown advance every minute
-    layer_mark_dirty(graphics_layer);
+    update_usage_band();
 #endif
   }
 
@@ -576,21 +580,33 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
 
 #ifdef PBL_PLATFORM_EMERY
     // Claude usage keys (emery face)
-    case KEY_USAGE_5H_PCT:
-      usage_5h_pct = t->value->uint8;
+    case KEY_USAGE_5H_PCT: {
+      uint8_t v = t->value->uint8;
+      if (v != usage_5h_pct) {
+        usage_last_change = (uint32_t)time(NULL);
+        persist_write_int(PERSIST_USAGE_LAST_CHANGE, (int32_t)usage_last_change);
+      }
+      usage_5h_pct = v;
       persist_write_int(KEY_USAGE_5H_PCT, usage_5h_pct);
       need_usage_redraw = 1;
       break;
+    }
     case KEY_USAGE_5H_RESET:
       usage_5h_reset = t->value->uint32;
       persist_write_int(KEY_USAGE_5H_RESET, (int32_t)usage_5h_reset);
       need_usage_redraw = 1;
       break;
-    case KEY_USAGE_7D_PCT:
-      usage_7d_pct = t->value->uint8;
+    case KEY_USAGE_7D_PCT: {
+      uint8_t v = t->value->uint8;
+      if (v != usage_7d_pct) {
+        usage_last_change = (uint32_t)time(NULL);
+        persist_write_int(PERSIST_USAGE_LAST_CHANGE, (int32_t)usage_last_change);
+      }
+      usage_7d_pct = v;
       persist_write_int(KEY_USAGE_7D_PCT, usage_7d_pct);
       need_usage_redraw = 1;
       break;
+    }
     case KEY_USAGE_7D_RESET:
       usage_7d_reset = t->value->uint32;
       persist_write_int(KEY_USAGE_7D_RESET, (int32_t)usage_7d_reset);
@@ -694,7 +710,9 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
 
   if (need_usage_redraw)
   {
-    layer_mark_dirty(graphics_layer);
+#ifdef PBL_PLATFORM_EMERY
+    update_usage_band();
+#endif
   }
 }
 
@@ -762,9 +780,8 @@ static void bluetooth_handler(bool state)
 // Claude usage lives in the band between the (raised) date and the bottom Bluetooth bar.
 #define USAGE_BAR_X 8
 #define USAGE_BAR_W (PBL_DISPLAY_WIDTH - 2 * USAGE_BAR_X)
-#define USAGE_BAR_TOP 198
-#define USAGE_BAR_H 3
-#define USAGE_BAR_PITCH 5 // 3px bar + 2px gap; 4 bars span 198..215
+#define USAGE_BAR_TOP 190
+#define USAGE_BAR_H 6
 
 // fraction (0-100) of a window still remaining before its reset epoch
 static uint8_t pct_time_remaining(uint32_t reset, uint32_t window)
@@ -794,12 +811,32 @@ static GColor usage_pace_color(uint8_t used, uint8_t elapsed)
   return GColorGreen;          // on or under pace
 }
 
+// decide whether the bottom band shows bars or date, then hide/show text_date accordingly
+static void update_usage_band(void)
+{
+  time_t now = time(NULL);
+  struct tm *t = localtime(&now);
+  bool bars;
+  if (usage_5h_reset == 0 && usage_7d_reset == 0)
+    bars = false; // no data yet -> show date
+  else if ((usage_7d_pct >= 100 && usage_7d_reset) ||
+           (usage_5h_pct >= 100 && usage_5h_reset))
+    bars = true;  // limit takeover wins
+  else if (usage_last_change && (uint32_t)now - usage_last_change < USAGE_FRESH_SECS)
+    bars = true;  // quota changed in the last hour -> show bars
+  else
+    bars = (t->tm_min % 2) == 0; // idle -> alternate per minute
+
+  usage_band_shows_bars = bars;
+  layer_set_hidden(text_layer_get_layer(text_date), bars);
+  layer_mark_dirty(graphics_layer);
+}
+
 // one horizontal bar: dim full-width track + bright fill scaled by pct
-static void draw_usage_bar(GContext *ctx, int idx, uint8_t pct, GColor fill, GColor track)
+static void draw_usage_bar(GContext *ctx, int y, uint8_t pct, GColor fill, GColor track)
 {
   if (pct > 100)
     pct = 100;
-  int y = USAGE_BAR_TOP + idx * USAGE_BAR_PITCH;
 
   graphics_context_set_fill_color(ctx, track);
   graphics_fill_rect(ctx, GRect(USAGE_BAR_X, y, USAGE_BAR_W, USAGE_BAR_H), 0, GCornersAll);
@@ -822,12 +859,12 @@ static void draw_usage_takeover(GContext *ctx, const char *text, GColor color)
 
 static void draw_usage(GContext *ctx)
 {
-  if (usage_5h_reset == 0 && usage_7d_reset == 0)
-    return; // no data yet -> leave the band empty
+  if (!usage_band_shows_bars)
+    return; // band shows date this minute
 
   GColor text_col = GColorFromHEX(flag_textColor);
 
-  // weekly limit hit -> the whole band becomes the reset date + time (highest priority)
+  // weekly limit hit -> whole band becomes reset date/time (highest priority)
   if (usage_7d_pct >= 100 && usage_7d_reset != 0)
   {
     time_t r = (time_t)usage_7d_reset;
@@ -837,7 +874,7 @@ static void draw_usage(GContext *ctx)
     return;
   }
 
-  // 5h session used up -> the band becomes a countdown to the reset
+  // 5h session used up -> band becomes countdown to reset
   if (usage_5h_pct >= 100 && usage_5h_reset != 0)
   {
     int secs = (int)usage_5h_reset - (int)time(NULL);
@@ -849,20 +886,25 @@ static void draw_usage(GContext *ctx)
     return;
   }
 
-  // normal: four bars. Each period is used (pace-coloured) directly above elapsed (cyan =
-  // the clock), so used-bar longer than the cyan bar below it = burning faster than time.
+  // normal: four taller bars in two pairs. Used (pace-coloured) above elapsed (cyan = clock).
+  // Used bar longer than cyan bar below = burning faster than the clock.
   GColor track = GColorDarkGray;
-  GColor ref = GColorCyan; // elapsed reference = how far the clock has moved
+  GColor ref   = GColorCyan;
 
   uint8_t e5 = pct_time_elapsed(usage_5h_reset, 5 * 3600);
   uint8_t e7 = pct_time_elapsed(usage_7d_reset, 7 * 86400);
 
-  draw_usage_bar(ctx, 0, usage_5h_pct, usage_pace_color(usage_5h_pct, e5), track); // 5h used
-  draw_usage_bar(ctx, 1, e5, ref, track);                                          // 5h elapsed
-  draw_usage_bar(ctx, 2, usage_7d_pct, usage_pace_color(usage_7d_pct, e7), track); // wk used
-  draw_usage_bar(ctx, 3, e7, ref, track);                                          // wk elapsed
+  int y0 = USAGE_BAR_TOP;                         // 5h used
+  int y1 = y0 + USAGE_BAR_H + 1;                  // 5h elapsed (1px intra-pair gap)
+  int y2 = y1 + USAGE_BAR_H + 5;                  // wk used   (5px inter-group gap)
+  int y3 = y2 + USAGE_BAR_H + 1;                  // wk elapsed
 
-  // stale marker: a small dim square at the right edge of the band
+  draw_usage_bar(ctx, y0, usage_5h_pct, usage_pace_color(usage_5h_pct, e5), track);
+  draw_usage_bar(ctx, y1, e5,           ref,                                track);
+  draw_usage_bar(ctx, y2, usage_7d_pct, usage_pace_color(usage_7d_pct, e7), track);
+  draw_usage_bar(ctx, y3, e7,           ref,                                track);
+
+  // stale marker: small dim square at right edge
   if (usage_stale)
   {
     graphics_context_set_fill_color(ctx, GColorDarkGray);
@@ -1046,8 +1088,8 @@ void handle_init(void)
   text_dow = create_text_layer(GRect(0, 30 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 31 * PBL_DISPLAY_HEIGHT / 168), bn_30, GTextAlignmentCenter);
   text_time = create_text_layer(get_time_frame(), bn_69, GTextAlignmentCenter);
 #if PBL_DISPLAY_HEIGHT != 168
-  // emery: raise the date to make room for the Claude usage bars below it
-  text_date = create_text_layer(GRect(0, 150, bounds.size.w, 30), bn_26, GTextAlignmentCenter);
+  // emery: date lives in the usage band; bars and date time-share this space (one at a time)
+  text_date = create_text_layer(GRect(0, 186, bounds.size.w, 38), bn_26, GTextAlignmentCenter);
 #else
   text_date = create_text_layer(GRect(0, 129 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 27 * PBL_DISPLAY_HEIGHT / 168), bn_26, GTextAlignmentCenter);
 #endif
@@ -1141,6 +1183,7 @@ void handle_init(void)
   if (persist_exists(KEY_USAGE_5H_RESET)) usage_5h_reset = (uint32_t)persist_read_int(KEY_USAGE_5H_RESET);
   if (persist_exists(KEY_USAGE_7D_PCT))   usage_7d_pct   = persist_read_int(KEY_USAGE_7D_PCT);
   if (persist_exists(KEY_USAGE_7D_RESET)) usage_7d_reset = (uint32_t)persist_read_int(KEY_USAGE_7D_RESET);
+  if (persist_exists(PERSIST_USAGE_LAST_CHANGE)) usage_last_change = (uint32_t)persist_read_int(PERSIST_USAGE_LAST_CHANGE);
   usage_stale = true;
 #endif
 
