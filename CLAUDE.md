@@ -37,6 +37,20 @@ day-of-week line with the next Sydney train departures. Installed on Bob's real 
 | 16/17/18 | TRAIN_DEPARTURE2 / PLATFORM2 / EXPRESS | →watch | dep2, bitmask (bit0/1 = dep1/2 fastest) |
 | 19–24 | PEAK1_START/END, PEAK2_START/END, PEAK_INTERVAL, OFFPEAK_INTERVAL | →watch | refresh schedule |
 | 30–35 | TFNSW_API_KEY, HOME/WORK_STATION_NAME, DIRECTION_MODE, CUTOFF_HOUR, FASTEST_MARKER | phone-only | Clay persistence only |
+| 40–44 | USAGE_5H_PCT / USAGE_5H_RESET / USAGE_7D_PCT / USAGE_7D_RESET / USAGE_STALE | →watch | Claude usage bars (emery only): quota % + reset epochs + stale flag |
+| 45 | CLAUDE_TOKEN | phone-only | OAuth token for the `/usage` endpoint (Clay persistence only) |
+
+## Claude usage bars (phone side fetch, emery render)
+
+Four narrow bars below the date on emery, fed by Claude Code's undocumented
+`GET https://api.anthropic.com/api/oauth/usage` (`five_hour`/`seven_day` → `utilization` 0-100 +
+`resets_at`). Bars: **5h used · 5h time-left · week used · week time-left**. The two "time-left"
+bars are derived on the watch from the reset epochs every minute, so only the two "used" bars need a
+poll. Takeovers: weekly exhausted → reset date/time text; else 5h exhausted → countdown (`draw_usage`
+in `main.c`, emery-guarded). Phone side (`app.js`): `getClaudeUsage()` with adaptive cadence
+(`usageInterval()`), a 5-min hard floor between attempts, and a localStorage cache replayed with a
+**stale** flag on any 429/error. Token is **phone-only** (`secrets.json.claudeToken` or Clay), needs a
+`User-Agent: claude-code/*` header for the generous rate-limit bucket, and **expires** (re-paste).
 
 ## TfNSW Trip Planner API (phone side only)
 

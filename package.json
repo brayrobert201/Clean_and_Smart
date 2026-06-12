@@ -41,7 +41,13 @@
             "KEY_WORK_STATION_NAME": 32,
             "KEY_DIRECTION_MODE": 33,
             "KEY_CUTOFF_HOUR": 34,
-            "KEY_FASTEST_MARKER": 35
+            "KEY_FASTEST_MARKER": 35,
+            "KEY_USAGE_5H_PCT": 40,
+            "KEY_USAGE_5H_RESET": 41,
+            "KEY_USAGE_7D_PCT": 42,
+            "KEY_USAGE_7D_RESET": 43,
+            "KEY_USAGE_STALE": 44,
+            "KEY_CLAUDE_TOKEN": 45
         },
         "projectType": "native",
         "resources": {

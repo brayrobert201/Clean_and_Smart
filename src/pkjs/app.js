@@ -8,6 +8,8 @@ var SECRETS = require('./secrets.json');
 
 var current_settings;
 var last_weather_fetch = 0;
+var last_usage_fetch = 0;   // last successful usage poll
+var last_usage_attempt = 0; // last poll attempt (success or fail) - rate-limit floor
 
 /*  ****************************************** Weather Section **************************************************** */
 
@@ -270,6 +272,114 @@ function pushSchedule() {
   }, noop, noop);
 }
 
+/*  ****************************************** Claude Usage Section **************************************************** */
+
+// Undocumented endpoint that backs Claude Code's /usage. Returns five_hour / seven_day objects
+// with a 0-100 `utilization` and an ISO `resets_at`. Phone-side only; the token never reaches the
+// watch. The User-Agent must look like claude-code or the request lands in a harshly throttled
+// bucket (forbidden XHR header in strict browsers, but pkjs is not a browser - we try anyway).
+var CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
+var CLAUDE_USER_AGENT = 'claude-code/1.0.0';
+
+function getUsageSettings() {
+  var c = current_settings || {};
+  var s = SECRETS || {};
+  return { token: String(c.claudeToken || s.claudeToken || '').trim() };
+}
+
+function readCachedUsage() {
+  try { return JSON.parse(localStorage.getItem('claude_usage')); } catch (ex) { return null; }
+}
+
+// pulls a 0-100 integer out of an endpoint sub-object, defensively
+function usageUtil(o) {
+  if (!o) return 0;
+  var u = parseFloat((o.utilization != null) ? o.utilization : o.used_pct);
+  if (isNaN(u)) u = 0;
+  return Math.max(0, Math.min(100, Math.round(u)));
+}
+
+// pulls an epoch-seconds reset time out of an endpoint sub-object, defensively
+function usageReset(o) {
+  if (!o) return 0;
+  var r = o.resets_at || o.reset_at || o.resetsAt || o.reset;
+  var t = r ? Date.parse(r) : NaN;
+  return isNaN(t) ? 0 : Math.floor(t / 1000);
+}
+
+function sendUsage(d, stale) {
+  Pebble.sendAppMessage({
+    'KEY_USAGE_5H_PCT':   d.five_pct,
+    'KEY_USAGE_5H_RESET': d.five_reset,
+    'KEY_USAGE_7D_PCT':   d.seven_pct,
+    'KEY_USAGE_7D_RESET': d.seven_reset,
+    'KEY_USAGE_STALE':    stale ? 1 : 0
+  }, noop, noop);
+}
+
+// on any failure, re-send the last good reading flagged stale so the watch keeps showing something
+function sendCachedUsage() {
+  var d = readCachedUsage();
+  if (d) sendUsage(d, 1);
+}
+
+function getClaudeUsage() {
+  var cfg = getUsageSettings();
+  if (!cfg.token) return; // not configured -> watch never shows the bars
+
+  last_usage_attempt = Date.now();
+
+  var xhr = new XMLHttpRequest();
+  xhr.onload = function () {
+    if (this.status === 200) {
+      try {
+        var j = JSON.parse(this.responseText);
+        var d = {
+          five_pct:    usageUtil(j.five_hour),
+          five_reset:  usageReset(j.five_hour),
+          seven_pct:   usageUtil(j.seven_day),
+          seven_reset: usageReset(j.seven_day)
+        };
+        localStorage.setItem('claude_usage', JSON.stringify(d));
+        last_usage_fetch = Date.now();
+        sendUsage(d, 0);
+        return;
+      } catch (ex) { /* fall through to stale */ }
+    }
+    sendCachedUsage(); // 429 / 401 / parse error -> keep last good, flagged stale
+  };
+  xhr.onerror = function () { sendCachedUsage(); };
+  xhr.open('GET', CLAUDE_USAGE_URL);
+  xhr.setRequestHeader('Authorization', 'Bearer ' + cfg.token);
+  xhr.setRequestHeader('anthropic-beta', 'oauth-2025-04-20');
+  try { xhr.setRequestHeader('User-Agent', CLAUDE_USER_AGENT); } catch (ex) {}
+  xhr.send();
+}
+
+// adaptive cadence: poll rarely with headroom, more often as quota fills or a 5h reset nears
+function usageInterval() {
+  var d = readCachedUsage();
+  if (!d) return 15 * 60 * 1000; // no data yet -> try reasonably promptly
+  var u = Math.max(d.five_pct || 0, d.seven_pct || 0);
+  var mins = (u >= 95) ? 5 : (u >= 80) ? 10 : (u >= 50) ? 20 : 30;
+  var now = Math.floor(Date.now() / 1000);
+  if (d.five_reset && d.five_reset - now > 0 && d.five_reset - now < 15 * 60) mins = Math.min(mins, 5);
+  return mins * 60 * 1000;
+}
+
+// called on every watch ping; decides whether to actually hit the network this time
+function maybeFetchUsage() {
+  if (!getUsageSettings().token) return;
+  var now = Date.now();
+  // hard floor between network attempts so we never hammer the throttled endpoint
+  if (now - last_usage_attempt < 5 * 60 * 1000) { sendCachedUsage(); return; }
+  if (now - last_usage_fetch >= usageInterval()) {
+    getClaudeUsage();
+  } else {
+    sendCachedUsage();
+  }
+}
+
 /*  ****************************************** Ready / AppMessage **************************************************** */
 
 Pebble.addEventListener('ready', function () {
@@ -293,7 +403,10 @@ Pebble.addEventListener('ready', function () {
 
   // tell the watch JS is ready, then push the refresh schedule (so a reinstalled
   // watch gets the cadence without the user reopening config)
-  Pebble.sendAppMessage({ 'KEY_JSREADY': 1 }, function () { pushSchedule(); }, noop);
+  Pebble.sendAppMessage({ 'KEY_JSREADY': 1 }, function () {
+    pushSchedule();
+    maybeFetchUsage(); // initial usage population on launch
+  }, noop);
 });
 
 Pebble.addEventListener('appmessage', function () {
@@ -303,6 +416,9 @@ Pebble.addEventListener('appmessage', function () {
   if (Date.now() - last_weather_fetch > 55 * 60 * 1000) {
     getLocation();
   }
+
+  // Claude usage on its own adaptive cadence (no-op until a token is configured)
+  maybeFetchUsage();
 });
 
 /*  ****************************************** Config Section **************************************************** */
@@ -365,6 +481,8 @@ Pebble.addEventListener('webviewclosed', function (e) {
     directionMode:         val('KEY_DIRECTION_MODE'),
     cutoffHour:            val('KEY_CUTOFF_HOUR'),
     fastestMarker:         bool('KEY_FASTEST_MARKER'),
+    // Claude usage OAuth token (phone-only; never sent to the watch)
+    claudeToken:           str('KEY_CLAUDE_TOKEN'),
     // refresh schedule (also pushed to the watch below)
     peak1Start:            val('KEY_PEAK1_START'),
     peak1End:              val('KEY_PEAK1_END'),
@@ -379,6 +497,9 @@ Pebble.addEventListener('webviewclosed', function (e) {
   Pebble.sendAppMessage(msg, function () {
     pushSchedule();
     fetchTrain();
+    // a token change should take effect now, bypassing the inter-attempt floor
+    last_usage_attempt = 0;
+    maybeFetchUsage();
   }, function () {
     fetchTrain();
   });

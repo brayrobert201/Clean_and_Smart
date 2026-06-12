@@ -49,6 +49,15 @@ static char s_train1[32]; // emery: both departures on one row; else: single gly
 static uint8_t peak1_start = 7, peak1_end = 9, peak2_start = 16, peak2_end = 19;
 static uint8_t peak_interval = 15, offpeak_interval = 15;
 
+#ifdef PBL_PLATFORM_EMERY
+// Claude subscription usage, pushed from the phone. The two _pct values are the quota used
+// (0-100); the two _reset values are epoch seconds when each window rolls over, from which the
+// watch derives the "time remaining" bars itself every minute. reset == 0 means "no data yet".
+static uint8_t usage_5h_pct = 0, usage_7d_pct = 0;
+static uint32_t usage_5h_reset = 0, usage_7d_reset = 0;
+static bool usage_stale = false;
+#endif
+
 EffectLayer *zoom_layer_time, *zoom_layer_meteoicon;
 
 uint8_t flag_hoursMinutesSeparator, flag_dateFormat, flag_bluetooth_alert, flag_language;
@@ -359,6 +368,11 @@ void tick_handler(struct tm *tick_time, TimeUnits units_changed)
 
     // refresh the departure display every minute (clock crossing a departure triggers a shift)
     update_train_display(tick_time);
+
+#ifdef PBL_PLATFORM_EMERY
+    // redraw so the usage "time remaining" bars / reset countdown advance every minute
+    layer_mark_dirty(graphics_layer);
+#endif
   }
 
   if (units_changed & DAY_UNIT)
@@ -472,6 +486,7 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
   bool need_weather = 0;
   bool need_time = 0;
   bool need_train_redraw = 0;
+  bool need_usage_redraw = 0;
 
   // For all items
   while (t != NULL)
@@ -558,6 +573,34 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       offpeak_interval = t->value->uint8;
       persist_write_int(KEY_OFFPEAK_INTERVAL, t->value->uint8);
       break;
+
+#ifdef PBL_PLATFORM_EMERY
+    // Claude usage keys (emery face)
+    case KEY_USAGE_5H_PCT:
+      usage_5h_pct = t->value->uint8;
+      persist_write_int(KEY_USAGE_5H_PCT, usage_5h_pct);
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_5H_RESET:
+      usage_5h_reset = t->value->uint32;
+      persist_write_int(KEY_USAGE_5H_RESET, (int32_t)usage_5h_reset);
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_7D_PCT:
+      usage_7d_pct = t->value->uint8;
+      persist_write_int(KEY_USAGE_7D_PCT, usage_7d_pct);
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_7D_RESET:
+      usage_7d_reset = t->value->uint32;
+      persist_write_int(KEY_USAGE_7D_RESET, (int32_t)usage_7d_reset);
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_STALE:
+      usage_stale = t->value->uint8 ? true : false;
+      need_usage_redraw = 1;
+      break;
+#endif
 
       // config keys
     case KEY_TEMPERATURE_FORMAT: // if temp format changed from F to C or back - need re-request weather
@@ -648,6 +691,11 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
     time_t temp = time(NULL);
     update_train_display(localtime(&temp));
   }
+
+  if (need_usage_redraw)
+  {
+    layer_mark_dirty(graphics_layer);
+  }
 }
 
 static void inbox_dropped_callback(AppMessageResult reason, void *context)
@@ -710,6 +758,97 @@ static void bluetooth_handler(bool state)
   layer_mark_dirty(graphics_layer);
 }
 
+#ifdef PBL_PLATFORM_EMERY
+// Claude usage lives in the band between the (raised) date and the bottom Bluetooth bar.
+#define USAGE_BAR_X 8
+#define USAGE_BAR_W (PBL_DISPLAY_WIDTH - 2 * USAGE_BAR_X)
+#define USAGE_BAR_TOP 198
+#define USAGE_BAR_H 3
+#define USAGE_BAR_PITCH 5 // 3px bar + 2px gap; 4 bars span 198..215
+
+// fraction (0-100) of a window still remaining before its reset epoch
+static uint8_t pct_time_remaining(uint32_t reset, uint32_t window)
+{
+  uint32_t now = (uint32_t)time(NULL);
+  if (reset <= now || window == 0)
+    return 0;
+  uint32_t rem = reset - now;
+  if (rem >= window)
+    return 100;
+  return (uint8_t)(rem * 100 / window);
+}
+
+// one horizontal bar: dim full-width track + bright fill scaled by pct
+static void draw_usage_bar(GContext *ctx, int idx, uint8_t pct, GColor fill, GColor track)
+{
+  if (pct > 100)
+    pct = 100;
+  int y = USAGE_BAR_TOP + idx * USAGE_BAR_PITCH;
+
+  graphics_context_set_fill_color(ctx, track);
+  graphics_fill_rect(ctx, GRect(USAGE_BAR_X, y, USAGE_BAR_W, USAGE_BAR_H), 0, GCornersAll);
+
+  int w = USAGE_BAR_W * pct / 100;
+  if (w > 0)
+  {
+    graphics_context_set_fill_color(ctx, fill);
+    graphics_fill_rect(ctx, GRect(USAGE_BAR_X, y, w, USAGE_BAR_H), 0, GCornersAll);
+  }
+}
+
+// draws a single centred takeover line where the four bars would otherwise be
+static void draw_usage_takeover(GContext *ctx, const char *text, GColor color)
+{
+  graphics_context_set_text_color(ctx, color);
+  graphics_draw_text(ctx, text, bn_19, GRect(4, USAGE_BAR_TOP - 4, PBL_DISPLAY_WIDTH - 8, 28),
+                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+}
+
+static void draw_usage(GContext *ctx)
+{
+  if (usage_5h_reset == 0 && usage_7d_reset == 0)
+    return; // no data yet -> leave the band empty
+
+  GColor text_col = GColorFromHEX(flag_textColor);
+
+  // weekly limit hit -> the whole band becomes the reset date + time (highest priority)
+  if (usage_7d_pct >= 100 && usage_7d_reset != 0)
+  {
+    time_t r = (time_t)usage_7d_reset;
+    static char buf[24];
+    strftime(buf, sizeof(buf), "WK %a %d %b %H:%M", localtime(&r));
+    draw_usage_takeover(ctx, buf, text_col);
+    return;
+  }
+
+  // 5h session used up -> the band becomes a countdown to the reset
+  if (usage_5h_pct >= 100 && usage_5h_reset != 0)
+  {
+    int secs = (int)usage_5h_reset - (int)time(NULL);
+    if (secs < 0)
+      secs = 0;
+    static char buf[24];
+    snprintf(buf, sizeof(buf), "RESET IN %dH%02dM", secs / 3600, (secs % 3600) / 60);
+    draw_usage_takeover(ctx, buf, text_col);
+    return;
+  }
+
+  // normal: four bars (used / time-left for the 5h block, then used / time-left for the week)
+  GColor track = GColorDarkGray;
+  draw_usage_bar(ctx, 0, usage_5h_pct, usage_5h_pct >= 90 ? GColorRed : text_col, track);
+  draw_usage_bar(ctx, 1, pct_time_remaining(usage_5h_reset, 5 * 3600), GColorCyan, track);
+  draw_usage_bar(ctx, 2, usage_7d_pct, usage_7d_pct >= 90 ? GColorRed : text_col, track);
+  draw_usage_bar(ctx, 3, pct_time_remaining(usage_7d_reset, 7 * 86400), GColorCyan, track);
+
+  // stale marker: a small dim square at the right edge of the band
+  if (usage_stale)
+  {
+    graphics_context_set_fill_color(ctx, GColorDarkGray);
+    graphics_fill_rect(ctx, GRect(PBL_DISPLAY_WIDTH - 4, USAGE_BAR_TOP, 2, 2), 0, GCornersAll);
+  }
+}
+#endif
+
 static void graphics_update_proc(Layer *layer, GContext *ctx)
 {
 
@@ -770,6 +909,10 @@ static void graphics_update_proc(Layer *layer, GContext *ctx)
     graphics_draw_circle(ctx, center, 76);
 #endif
   }
+
+#ifdef PBL_PLATFORM_EMERY
+  draw_usage(ctx);
+#endif
 }
 
 static void battery_handler(BatteryChargeState state)
@@ -880,7 +1023,12 @@ void handle_init(void)
 #ifdef PBL_RECT
   text_dow = create_text_layer(GRect(0, 30 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 31 * PBL_DISPLAY_HEIGHT / 168), bn_30, GTextAlignmentCenter);
   text_time = create_text_layer(get_time_frame(), bn_69, GTextAlignmentCenter);
+#if PBL_DISPLAY_HEIGHT != 168
+  // emery: raise the date to make room for the Claude usage bars below it
+  text_date = create_text_layer(GRect(0, 166, bounds.size.w, 30), bn_26, GTextAlignmentCenter);
+#else
   text_date = create_text_layer(GRect(0, 129 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 27 * PBL_DISPLAY_HEIGHT / 168), bn_26, GTextAlignmentCenter);
+#endif
   text_battery = create_text_layer(GRect(PBL_DISPLAY_WIDTH - 46 * PBL_DISPLAY_WIDTH / 144, 0, 43 * PBL_DISPLAY_WIDTH / 144, 21 * PBL_DISPLAY_HEIGHT / 168), bn_19, GTextAlignmentRight);
   text_temp = create_text_layer(GRect(3, 0, 80 * PBL_DISPLAY_WIDTH / 144, 21 * PBL_DISPLAY_HEIGHT / 168), bn_19, GTextAlignmentLeft);
 
@@ -964,6 +1112,15 @@ void handle_init(void)
   if (persist_exists(KEY_PEAK2_END))        peak2_end = persist_read_int(KEY_PEAK2_END);
   if (persist_exists(KEY_PEAK_INTERVAL))    peak_interval = persist_read_int(KEY_PEAK_INTERVAL);
   if (persist_exists(KEY_OFFPEAK_INTERVAL)) offpeak_interval = persist_read_int(KEY_OFFPEAK_INTERVAL);
+
+#ifdef PBL_PLATFORM_EMERY
+  // restoring Claude usage; treat restored data as stale until the phone re-confirms
+  if (persist_exists(KEY_USAGE_5H_PCT))   usage_5h_pct   = persist_read_int(KEY_USAGE_5H_PCT);
+  if (persist_exists(KEY_USAGE_5H_RESET)) usage_5h_reset = (uint32_t)persist_read_int(KEY_USAGE_5H_RESET);
+  if (persist_exists(KEY_USAGE_7D_PCT))   usage_7d_pct   = persist_read_int(KEY_USAGE_7D_PCT);
+  if (persist_exists(KEY_USAGE_7D_RESET)) usage_7d_reset = (uint32_t)persist_read_int(KEY_USAGE_7D_RESET);
+  usage_stale = true;
+#endif
 
   // initial bluetooth check
   flag_bluetooth_alert = 0;

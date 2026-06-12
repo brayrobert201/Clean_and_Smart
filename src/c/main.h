@@ -25,6 +25,13 @@
 #define KEY_PEAK_INTERVAL 23
 #define KEY_OFFPEAK_INTERVAL 24
 
+// Claude subscription usage (emery face only); reset values are epoch seconds
+#define KEY_USAGE_5H_PCT 40
+#define KEY_USAGE_5H_RESET 41
+#define KEY_USAGE_7D_PCT 42
+#define KEY_USAGE_7D_RESET 43
+#define KEY_USAGE_STALE 44
+
 #ifdef PBL_RECT
 #define ICON_WIDTH 40
 #define ICON_HEIGHT 20

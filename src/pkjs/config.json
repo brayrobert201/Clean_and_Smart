@@ -200,6 +200,20 @@
   {
     "type": "section",
     "items": [
+      { "type": "heading", "defaultValue": "Claude Usage (Pebble Time 2)" },
+      {
+        "type": "input",
+        "messageKey": "KEY_CLAUDE_TOKEN",
+        "label": "Claude OAuth Token",
+        "defaultValue": "",
+        "description": "From ~/.claude/.credentials.json (claudeAiOauth.accessToken). Read only on your phone to show your /usage limits; never sent to the watch. Leave blank to hide the bars. Note: this token expires periodically and must be re-pasted.",
+        "attributes": { "placeholder": "sk-ant-oat...", "type": "text" }
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
       { "type": "heading", "defaultValue": "Colors" },
       {
         "type": "color",
