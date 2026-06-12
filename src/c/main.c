@@ -67,6 +67,8 @@ static uint8_t flag_usage_abs_warn     = 10;  // amber gate: used >= N (0=disabl
 static int     flag_usage_color_good   = 0x00FF00;
 static int     flag_usage_color_over   = 0xFFAA00;
 static int     flag_usage_color_crit   = 0xFF0000;
+static bool s_usage_phase = false;
+static AppTimer *s_usage_timer = NULL;
 static void update_usage_band(void);    // forward declaration (defined near draw_usage)
 #endif
 
@@ -834,7 +836,7 @@ static void bluetooth_handler(bool state)
 // Claude usage lives in the band between the (raised) date and the bottom Bluetooth bar.
 #define USAGE_BAR_X 8
 #define USAGE_BAR_W (PBL_DISPLAY_WIDTH - 2 * USAGE_BAR_X)
-#define USAGE_BAR_TOP 188
+#define USAGE_BAR_TOP 178
 #define USAGE_BAR_H 8
 
 // fraction (0-100) of a window still remaining before its reset epoch
@@ -855,6 +857,18 @@ static uint8_t pct_time_elapsed(uint32_t reset, uint32_t window)
   return 100 - pct_time_remaining(reset, window);
 }
 
+// format seconds-until-reset as "Xd Yh", "Xh Ym", or "Xm"
+static void fmt_countdown(char *buf, size_t n, uint32_t reset_epoch)
+{
+  int secs = (int)reset_epoch - (int)time(NULL);
+  if (secs <= 0) { snprintf(buf, n, "--"); return; }
+  int h = secs / 3600, m = (secs % 3600) / 60, d = h / 24;
+  h %= 24;
+  if (d > 0)      snprintf(buf, n, "%dd%dh", d, h);
+  else if (h > 0) snprintf(buf, n, "%dh%dm", h, m);
+  else            snprintf(buf, n, "%dm", m);
+}
+
 // colour a "used" bar: two-gate — must be BOTH ahead of pace AND past the absolute floor
 static GColor usage_pace_color(uint8_t used, uint8_t elapsed)
 {
@@ -871,7 +885,6 @@ static GColor usage_pace_color(uint8_t used, uint8_t elapsed)
 static void update_usage_band(void)
 {
   time_t now = time(NULL);
-  struct tm *t = localtime(&now);
   bool no_data = (usage_5h_reset == 0 && usage_7d_reset == 0);
   bool bars;
   switch (flag_usage_band_mode) {
@@ -879,7 +892,7 @@ static void update_usage_band(void)
       bars = true;
       break;
     case 2: // always alternate
-      bars = !no_data && (t->tm_min % 2) == 0;
+      bars = !no_data && s_usage_phase;
       break;
     default: // 0 = smart
       if (no_data)
@@ -890,12 +903,19 @@ static void update_usage_band(void)
       else if (usage_last_change && (uint32_t)now - usage_last_change < USAGE_FRESH_SECS)
         bars = true;  // usage seen recently -> stay on bars
       else
-        bars = (t->tm_min % 2) == 0; // idle -> alternate per minute
+        bars = s_usage_phase; // idle -> alternate per 15s
       break;
   }
   usage_band_shows_bars = bars;
   layer_set_hidden(text_layer_get_layer(text_date), bars);
   layer_mark_dirty(graphics_layer);
+}
+
+static void usage_timer_callback(void *context)
+{
+  s_usage_phase = !s_usage_phase;
+  update_usage_band();
+  s_usage_timer = app_timer_register(15000, usage_timer_callback, NULL);
 }
 
 // one horizontal bar: dim full-width track + bright fill scaled by pct
@@ -962,15 +982,23 @@ static void draw_usage(GContext *ctx)
 
   if (flag_usage_display_mode == 1)
   {
-    // text mode: raw percentages side-by-side
-    static char b5[10], b7[10];
+    // text mode: 2x2 grid — pct row + countdown row, each column is one window
+    static char b5[8], b7[8], t5[10], t7[10];
+    GFont big = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+    GFont sm  = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+    int hw = USAGE_BAR_W / 2;
     snprintf(b5, sizeof(b5), "5h:%d%%", (int)usage_5h_pct);
     snprintf(b7, sizeof(b7), "Wk:%d%%", (int)usage_7d_pct);
-    int hw = USAGE_BAR_W / 2;
+    fmt_countdown(t5, sizeof(t5), usage_5h_reset);
+    fmt_countdown(t7, sizeof(t7), usage_7d_reset);
     graphics_context_set_text_color(ctx, text_col);
-    graphics_draw_text(ctx, b5, bn_19, GRect(USAGE_BAR_X, USAGE_BAR_TOP, hw, 30),
+    graphics_draw_text(ctx, b5, big, GRect(USAGE_BAR_X, USAGE_BAR_TOP,      hw, 22),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-    graphics_draw_text(ctx, b7, bn_19, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP, hw, 30),
+    graphics_draw_text(ctx, b7, big, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP, hw, 22),
+                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    graphics_draw_text(ctx, t5, sm, GRect(USAGE_BAR_X, USAGE_BAR_TOP + 22,      hw, 18),
+                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    graphics_draw_text(ctx, t7, sm, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP + 22, hw, 18),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
   }
   else
@@ -1173,7 +1201,7 @@ void handle_init(void)
   text_time = create_text_layer(get_time_frame(), bn_69, GTextAlignmentCenter);
 #if PBL_DISPLAY_HEIGHT != 168
   // emery: date lives in the usage band; bars and date time-share this space (one at a time)
-  text_date = create_text_layer(GRect(0, 186, bounds.size.w, 38), bn_26, GTextAlignmentCenter);
+  text_date = create_text_layer(GRect(0, 178, bounds.size.w, 42), bn_26, GTextAlignmentCenter);
 #else
   text_date = create_text_layer(GRect(0, 129 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 27 * PBL_DISPLAY_HEIGHT / 168), bn_26, GTextAlignmentCenter);
 #endif
@@ -1289,6 +1317,7 @@ void handle_init(void)
 #ifdef PBL_PLATFORM_EMERY
   if (touch_service_is_enabled())
     touch_service_subscribe(touch_handler, NULL);
+  s_usage_timer = app_timer_register(15000, usage_timer_callback, NULL);
 #endif
 
   // Get a time structure so that the face doesn't start blank
@@ -1330,6 +1359,7 @@ void handle_deinit(void)
   unobstructed_area_service_unsubscribe();
 #ifdef PBL_PLATFORM_EMERY
   touch_service_unsubscribe();
+  if (s_usage_timer) { app_timer_cancel(s_usage_timer); s_usage_timer = NULL; }
 #endif
   //   app_focus_service_unsubscribe();
 }
