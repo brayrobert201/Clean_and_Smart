@@ -11,15 +11,25 @@ Layer *window_layer;
 #define TWO_LINE_TRAIN 1
 #endif
 
-// compact direction glyphs (single guillemets, present in both Big Noodle TTFs)
+// compact direction glyphs for single-line displays (present in both Big Noodle TTFs)
 #define GLYPH_TO_WORK "\xE2\x80\xBA" // ›
 #define GLYPH_TO_HOME "\xE2\x80\xB9" // ‹
 
+// direction icon sprite cells, indexed by train_direction: 0 = work (building), 1 = home (house)
+#define DIR_ICON_W 26
+#define DIR_ICON_H 26
+
 TextLayer *text_time, *text_date, *text_dow, *text_battery, *text_temp;
-TextLayer *text_train1, *text_train2;
 Layer *graphics_layer;
 BitmapLayer *temp_layer;
 GBitmap *meteoicons_all, *meteoicon_current;
+
+#ifdef TWO_LINE_TRAIN
+TextLayer *text_train;
+BitmapLayer *direction_layer;
+GBitmap *direction_icons_all = NULL, *direction_icon_current = NULL;
+GFont bn_train;
+#endif
 
 GFont bn_69, bn_30, bn_26, bn_20, bn_19;
 
@@ -33,10 +43,7 @@ static uint32_t train_dep[2] = {0, 0}; // epoch seconds of next two trains, 0 = 
 static uint8_t train_direction = 0;    // 0 = to work (›), 1 = to home (‹)
 static uint8_t train_express = 0;      // bitmask: bit0 = dep1 fastest, bit1 = dep2 fastest
 static char s_train_platform[2][8];
-static char s_train1[24];
-#ifdef TWO_LINE_TRAIN
-static char s_train2[24];
-#endif
+static char s_train1[32]; // emery: both departures on one row; else: single glyph line
 
 // refresh schedule (defaults give the previous all-day 15-min behaviour until JS pushes config)
 static uint8_t peak1_start = 7, peak1_end = 9, peak2_start = 16, peak2_end = 19;
@@ -143,12 +150,14 @@ static void show_icon(int w_icon)
   bitmap_layer_set_bitmap(temp_layer, meteoicon_current);
 }
 
-static void tint_meteoicon() {
-  GColor *palette = gbitmap_get_palette(meteoicons_all);
+// recolours a palettised bitmap's non-transparent entries to the current text color
+static void tint_bitmap(GBitmap *bmp) {
+  if (!bmp) return;
+  GColor *palette = gbitmap_get_palette(bmp);
   if (!palette) return;
 
   int num_colors;
-  switch (gbitmap_get_format(meteoicons_all)) {
+  switch (gbitmap_get_format(bmp)) {
     case GBitmapFormat1BitPalette: num_colors = 2; break;
     case GBitmapFormat2BitPalette: num_colors = 4; break;
     case GBitmapFormat4BitPalette: num_colors = 16; break;
@@ -161,6 +170,10 @@ static void tint_meteoicon() {
       palette[i] = new_color;
     }
   }
+}
+
+static void tint_meteoicon() {
+  tint_bitmap(meteoicons_all);
   layer_mark_dirty(bitmap_layer_get_layer(temp_layer));
 }
 
@@ -209,19 +222,30 @@ static void format_dep_time(uint32_t epoch, char *buf, size_t bufsize)
   buf[bufsize - 1] = '\0';
 }
 
-// toggles between train lines and the day-of-week fallback (only meaningful on two-line displays)
+// toggles between the train display and the day-of-week fallback (only on the emery two-line path)
 static void show_train_layers(bool train)
 {
 #ifdef TWO_LINE_TRAIN
   layer_set_hidden(text_layer_get_layer(text_dow), train);
-  layer_set_hidden(text_layer_get_layer(text_train1), !train);
-  layer_set_hidden(text_layer_get_layer(text_train2), !train);
+  layer_set_hidden(text_layer_get_layer(text_train), !train);
+  layer_set_hidden(bitmap_layer_get_layer(direction_layer), !train);
 #else
   (void)train;
 #endif
 }
 
-// builds one departure line: "› 8:35 P1*"
+#ifdef TWO_LINE_TRAIN
+// builds one departure cell without the direction glyph: "8:35 P1*"
+static void format_dep_cell(int slot, char *buf, size_t bufsize)
+{
+  char tbuf[8];
+  format_dep_time(train_dep[slot], tbuf, sizeof(tbuf));
+  snprintf(buf, bufsize, "%s %s%s",
+           tbuf, s_train_platform[slot],
+           (train_express & (1 << slot)) ? "*" : "");
+}
+#else
+// builds one departure line with a direction glyph: "› 8:35 P1*"
 static void format_train_line(int slot, char *buf, size_t bufsize)
 {
   char tbuf[8];
@@ -231,6 +255,7 @@ static void format_train_line(int slot, char *buf, size_t bufsize)
            tbuf, s_train_platform[slot],
            (train_express & (1 << slot)) ? "*" : "");
 }
+#endif
 
 // shows the next train departure clock time(s), falling back to day of week when no usable data
 static void update_train_display(struct tm *tick_time)
@@ -259,16 +284,26 @@ static void update_train_display(struct tm *tick_time)
 
   show_train_layers(true);
 
-  format_train_line(0, s_train1, sizeof(s_train1));
-
 #ifdef TWO_LINE_TRAIN
-  text_layer_set_text(text_train1, s_train1);
+  // direction icon (building = cityward, house = homeward), shown once for the block
+  if (direction_icon_current)
+    gbitmap_destroy(direction_icon_current);
+  direction_icon_current = gbitmap_create_as_sub_bitmap(
+      direction_icons_all, GRect(0, DIR_ICON_H * (train_direction ? 1 : 0), DIR_ICON_W, DIR_ICON_H));
+  bitmap_layer_set_bitmap(direction_layer, direction_icon_current);
+
+  // both departures on one row: "8:35 P1  8:40 P1"
+  char cell[12];
+  format_dep_cell(0, s_train1, sizeof(s_train1));
   if (train_dep[1] != 0)
-    format_train_line(1, s_train2, sizeof(s_train2));
-  else
-    s_train2[0] = '\0';
-  text_layer_set_text(text_train2, s_train2);
+  {
+    format_dep_cell(1, cell, sizeof(cell));
+    strncat(s_train1, "  ", sizeof(s_train1) - strlen(s_train1) - 1);
+    strncat(s_train1, cell, sizeof(s_train1) - strlen(s_train1) - 1);
+  }
+  text_layer_set_text(text_train, s_train1);
 #else
+  format_train_line(0, s_train1, sizeof(s_train1));
   text_layer_set_text(text_dow, s_train1);
 #endif
 }
@@ -405,6 +440,13 @@ void load_fonts()
     bn_30 = fonts_load_custom_font(resource_get_handle(PBL_IF_HEIGHT_168_ELSE(RESOURCE_ID_BIG_NOODLE_ENG_30, RESOURCE_ID_BIG_NOODLE_ENG_41)));
     bn_26 = fonts_load_custom_font(resource_get_handle(PBL_IF_HEIGHT_168_ELSE(RESOURCE_ID_BIG_NOODLE_ENG_26, RESOURCE_ID_BIG_NOODLE_ENG_35)));
   }
+
+#ifdef TWO_LINE_TRAIN
+  // slightly larger font for the single departures row (30px)
+  fonts_unload_custom_font(bn_train);
+  bn_train = fonts_load_custom_font(resource_get_handle(
+      flag_language == LANG_RUSSIAN ? RESOURCE_ID_BIG_NOODLE_30 : RESOURCE_ID_BIG_NOODLE_ENG_30));
+#endif
 
 #else
   fonts_unload_custom_font(bn_20);
@@ -567,8 +609,9 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         text_layer_set_text_color(text_battery, GColorFromHEX(flag_textColor));
         text_layer_set_text_color(text_temp,    GColorFromHEX(flag_textColor));
 #ifdef TWO_LINE_TRAIN
-        text_layer_set_text_color(text_train1,  GColorFromHEX(flag_textColor));
-        text_layer_set_text_color(text_train2,  GColorFromHEX(flag_textColor));
+        text_layer_set_text_color(text_train,   GColorFromHEX(flag_textColor));
+        tint_bitmap(direction_icons_all);
+        layer_mark_dirty(bitmap_layer_get_layer(direction_layer));
 #endif
       }
       break;
@@ -809,6 +852,9 @@ void handle_init(void)
   layer_add_child(window_layer, graphics_layer);
 
   meteoicons_all = gbitmap_create_with_resource(RESOURCE_ID_METEOICONS);
+#ifdef TWO_LINE_TRAIN
+  direction_icons_all = gbitmap_create_with_resource(RESOURCE_ID_DIRECTION_ICONS);
+#endif
 #ifdef PBL_RECT
   temp_layer = bitmap_layer_create(GRect(51 * PBL_DISPLAY_WIDTH / 144, 1, 41 * PBL_DISPLAY_WIDTH / 144, 20 * PBL_DISPLAY_HEIGHT / 168));
 #else
@@ -825,6 +871,9 @@ void handle_init(void)
   flag_bgColor   = persist_exists(KEY_BG_COLOR)   ? persist_read_int(KEY_BG_COLOR)   : 0x000000;
   window_set_background_color(my_window, GColorFromHEX(flag_bgColor));
   tint_meteoicon();
+#ifdef TWO_LINE_TRAIN
+  tint_bitmap(direction_icons_all);
+#endif
 
   load_fonts();
 
@@ -836,11 +885,13 @@ void handle_init(void)
   text_temp = create_text_layer(GRect(3, 0, 80 * PBL_DISPLAY_WIDTH / 144, 21 * PBL_DISPLAY_HEIGHT / 168), bn_19, GTextAlignmentLeft);
 
   #if PBL_DISPLAY_HEIGHT != 168
-  // two smaller departure lines fill the band between the battery bar and the time
-  text_train1 = create_text_layer(GRect(0, 27 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 20 * PBL_DISPLAY_HEIGHT / 168), bn_19, GTextAlignmentCenter);
-  text_train2 = create_text_layer(GRect(0, 46 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w, 20 * PBL_DISPLAY_HEIGHT / 168), bn_19, GTextAlignmentCenter);
-  layer_set_hidden(text_layer_get_layer(text_train1), true);
-  layer_set_hidden(text_layer_get_layer(text_train2), true);
+  // direction icon + both departures on one row, in the band between the battery bar and the time
+  direction_layer = bitmap_layer_create(GRect(6, 31 * PBL_DISPLAY_HEIGHT / 168, DIR_ICON_W, DIR_ICON_H));
+  bitmap_layer_set_compositing_mode(direction_layer, GCompOpSet);
+  layer_add_child(window_layer, bitmap_layer_get_layer(direction_layer));
+  text_train = create_text_layer(GRect(34, 28 * PBL_DISPLAY_HEIGHT / 168, bounds.size.w - 38, 33 * PBL_DISPLAY_HEIGHT / 168), bn_train, GTextAlignmentCenter);
+  layer_set_hidden(bitmap_layer_get_layer(direction_layer), true);
+  layer_set_hidden(text_layer_get_layer(text_train), true);
 
   zoom_layer_time = effect_layer_create(get_time_frame());
   effect_layer_add_effect(zoom_layer_time, effect_zoom, EL_ZOOM(139, 136));
@@ -945,8 +996,11 @@ void handle_deinit(void)
   text_layer_destroy(text_battery);
   text_layer_destroy(text_temp);
 #ifdef TWO_LINE_TRAIN
-  text_layer_destroy(text_train1);
-  text_layer_destroy(text_train2);
+  text_layer_destroy(text_train);
+  bitmap_layer_destroy(direction_layer);
+  if (direction_icon_current)
+    gbitmap_destroy(direction_icon_current);
+  gbitmap_destroy(direction_icons_all);
 #endif
 
   gbitmap_destroy(meteoicons_all);

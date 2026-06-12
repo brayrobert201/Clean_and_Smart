@@ -102,6 +102,11 @@
                     "type": "bitmap"
                 },
                 {
+                    "file": "images/direction_icons.png",
+                    "name": "DIRECTION_ICONS",
+                    "type": "bitmap"
+                },
+                {
                     "file": "fonts/Big_Noodle_Titling_Cyr.ttf",
                     "name": "BIG_NOODLE_19",
                     "targetPlatforms": null,
