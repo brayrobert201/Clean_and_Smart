@@ -861,7 +861,7 @@ static uint8_t pct_time_elapsed(uint32_t reset, uint32_t window)
 static void fmt_countdown(char *buf, size_t n, uint32_t reset_epoch)
 {
   int secs = (int)reset_epoch - (int)time(NULL);
-  if (secs <= 0) { snprintf(buf, n, "--"); return; }
+  if (secs <= 0) { buf[0] = '\0'; return; }  // past/unknown: leave blank
   int h = secs / 3600, m = (secs % 3600) / 60, d = h / 24;
   h %= 24;
   if (d > 0)      snprintf(buf, n, "%dd%dh", d, h);
@@ -982,23 +982,22 @@ static void draw_usage(GContext *ctx)
 
   if (flag_usage_display_mode == 1)
   {
-    // text mode: 2x2 grid — pct row + countdown row, each column is one window
+    // text mode: 2x2 grid — pct row (Big Noodle 26) + countdown row (Gothic 18B)
     static char b5[8], b7[8], t5[10], t7[10];
-    GFont big = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-    GFont sm  = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+    GFont sm = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
     int hw = USAGE_BAR_W / 2;
     snprintf(b5, sizeof(b5), "5h:%d%%", (int)usage_5h_pct);
     snprintf(b7, sizeof(b7), "Wk:%d%%", (int)usage_7d_pct);
     fmt_countdown(t5, sizeof(t5), usage_5h_reset);
     fmt_countdown(t7, sizeof(t7), usage_7d_reset);
     graphics_context_set_text_color(ctx, text_col);
-    graphics_draw_text(ctx, b5, big, GRect(USAGE_BAR_X, USAGE_BAR_TOP,      hw, 22),
+    graphics_draw_text(ctx, b5, bn_19, GRect(USAGE_BAR_X, USAGE_BAR_TOP,      hw, 28),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-    graphics_draw_text(ctx, b7, big, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP, hw, 22),
+    graphics_draw_text(ctx, b7, bn_19, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP, hw, 28),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-    graphics_draw_text(ctx, t5, sm, GRect(USAGE_BAR_X, USAGE_BAR_TOP + 22,      hw, 18),
+    graphics_draw_text(ctx, t5, sm, GRect(USAGE_BAR_X, USAGE_BAR_TOP + 27,      hw, 22),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-    graphics_draw_text(ctx, t7, sm, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP + 22, hw, 18),
+    graphics_draw_text(ctx, t7, sm, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP + 27, hw, 22),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
   }
   else
