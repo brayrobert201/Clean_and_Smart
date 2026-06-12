@@ -836,7 +836,7 @@ static void bluetooth_handler(bool state)
 // Claude usage lives in the band between the (raised) date and the bottom Bluetooth bar.
 #define USAGE_BAR_X 8
 #define USAGE_BAR_W (PBL_DISPLAY_WIDTH - 2 * USAGE_BAR_X)
-#define USAGE_BAR_TOP 178
+#define USAGE_BAR_TOP 168
 #define USAGE_BAR_H 8
 
 // fraction (0-100) of a window still remaining before its reset epoch
@@ -982,22 +982,21 @@ static void draw_usage(GContext *ctx)
 
   if (flag_usage_display_mode == 1)
   {
-    // text mode: 2x2 grid — pct row (Big Noodle 26) + countdown row (Gothic 18B)
+    // text mode: 2x2 grid — both rows Big Noodle 26 (fills 60px band to display edge)
     static char b5[8], b7[8], t5[10], t7[10];
-    GFont sm = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
     int hw = USAGE_BAR_W / 2;
     snprintf(b5, sizeof(b5), "5h:%d%%", (int)usage_5h_pct);
     snprintf(b7, sizeof(b7), "Wk:%d%%", (int)usage_7d_pct);
     fmt_countdown(t5, sizeof(t5), usage_5h_reset);
     fmt_countdown(t7, sizeof(t7), usage_7d_reset);
     graphics_context_set_text_color(ctx, text_col);
-    graphics_draw_text(ctx, b5, bn_19, GRect(USAGE_BAR_X, USAGE_BAR_TOP,      hw, 28),
+    graphics_draw_text(ctx, b5, bn_19, GRect(USAGE_BAR_X, USAGE_BAR_TOP,      hw, 30),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-    graphics_draw_text(ctx, b7, bn_19, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP, hw, 28),
+    graphics_draw_text(ctx, b7, bn_19, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP, hw, 30),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-    graphics_draw_text(ctx, t5, sm, GRect(USAGE_BAR_X, USAGE_BAR_TOP + 27,      hw, 22),
+    graphics_draw_text(ctx, t5, bn_19, GRect(USAGE_BAR_X, USAGE_BAR_TOP + 30,      hw, 30),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-    graphics_draw_text(ctx, t7, sm, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP + 27, hw, 22),
+    graphics_draw_text(ctx, t7, bn_19, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP + 30, hw, 30),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
   }
   else
