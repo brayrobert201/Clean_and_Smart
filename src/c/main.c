@@ -860,8 +860,9 @@ static uint8_t pct_time_elapsed(uint32_t reset, uint32_t window)
 // format seconds-until-reset as "Xd Yh", "Xh Ym", or "Xm"
 static void fmt_countdown(char *buf, size_t n, uint32_t reset_epoch)
 {
+  if (reset_epoch == 0) { buf[0] = '\0'; return; }  // no data yet
   int secs = (int)reset_epoch - (int)time(NULL);
-  if (secs <= 0) { buf[0] = '\0'; return; }  // past/unknown: leave blank
+  if (secs <= 0) { snprintf(buf, n, "new"); return; }  // window rolled, fresh soon
   int h = secs / 3600, m = (secs % 3600) / 60, d = h / 24;
   h %= 24;
   if (d > 0)      snprintf(buf, n, "%dd%dh", d, h);
@@ -950,39 +951,9 @@ static void draw_usage(GContext *ctx)
 
   GColor text_col = GColorFromHEX(flag_textColor);
 
-  // weekly limit hit -> whole band becomes reset date/time (highest priority)
-  // once the reset epoch passes, fall through to bars (stale data until phone confirms)
-  if (usage_7d_pct >= 100 && usage_7d_reset != 0 && (uint32_t)time(NULL) < usage_7d_reset)
-  {
-    time_t r = (time_t)usage_7d_reset;
-    static char buf[24];
-    strftime(buf, sizeof(buf), "WK %a %d %b %H:%M", localtime(&r));
-    draw_usage_takeover(ctx, buf, text_col);
-    return;
-  }
-
-  // 5h session used up -> band becomes countdown to reset
-  // once reset epoch passes, fall through to bars (stale data until phone confirms)
-  if (usage_5h_pct >= 100 && usage_5h_reset != 0)
-  {
-    int secs = (int)usage_5h_reset - (int)time(NULL);
-    if (secs > 0)
-    {
-      static char buf[24];
-      snprintf(buf, sizeof(buf), "RESET IN %dH%02dM", secs / 3600, (secs % 3600) / 60);
-      draw_usage_takeover(ctx, buf, text_col);
-      return;
-    }
-  }
-
-  // normal: four taller bars in two pairs. Used (pace-coloured) above elapsed (cyan = clock).
-  // Used bar longer than cyan bar below = burning faster than the clock.
-  uint8_t e5 = pct_time_elapsed(usage_5h_reset, 5 * 3600);
-  uint8_t e7 = pct_time_elapsed(usage_7d_reset, 7 * 86400);
-
   if (flag_usage_display_mode == 1)
   {
-    // text mode: 2x2 grid — both rows Big Noodle 26 (fills 60px band to display edge)
+    // text mode: always show 2x2 pct+countdown grid, no takeovers
     static char b5[8], b7[8], t5[10], t7[10];
     int hw = USAGE_BAR_W / 2;
     snprintf(b5, sizeof(b5), "5h:%d%%", (int)usage_5h_pct);
@@ -998,21 +969,45 @@ static void draw_usage(GContext *ctx)
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
     graphics_draw_text(ctx, t7, bn_19, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP + 30, hw, 30),
                        GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    return;
   }
-  else
+
+  // bar mode: takeovers when limits hit, then four bars
+  // weekly limit hit -> whole band becomes reset date/time
+  if (usage_7d_pct >= 100 && usage_7d_reset != 0 && (uint32_t)time(NULL) < usage_7d_reset)
   {
-    // bars mode: four taller bars in two pairs (8px each, y3 ends at 224)
-    GColor track = GColorDarkGray;
-    GColor ref   = GColorCyan;
-    int y0 = USAGE_BAR_TOP;                        // 5h used
-    int y1 = y0 + USAGE_BAR_H + 1;                 // 5h elapsed
-    int y2 = y1 + USAGE_BAR_H + 2;                 // wk used   (2px inter-group gap)
-    int y3 = y2 + USAGE_BAR_H + 1;                 // wk elapsed (ends y=224)
-    draw_usage_bar(ctx, y0, usage_5h_pct, usage_pace_color(usage_5h_pct, e5), track);
-    draw_usage_bar(ctx, y1, e5,           ref,                                track);
-    draw_usage_bar(ctx, y2, usage_7d_pct, usage_pace_color(usage_7d_pct, e7), track);
-    draw_usage_bar(ctx, y3, e7,           ref,                                track);
+    time_t r = (time_t)usage_7d_reset;
+    static char buf[24];
+    strftime(buf, sizeof(buf), "WK %a %d %b %H:%M", localtime(&r));
+    draw_usage_takeover(ctx, buf, text_col);
+    return;
   }
+
+  // 5h session used up -> band becomes countdown to reset
+  if (usage_5h_pct >= 100 && usage_5h_reset != 0)
+  {
+    int secs = (int)usage_5h_reset - (int)time(NULL);
+    if (secs > 0)
+    {
+      static char buf[24];
+      snprintf(buf, sizeof(buf), "RESET IN %dH%02dM", secs / 3600, (secs % 3600) / 60);
+      draw_usage_takeover(ctx, buf, text_col);
+      return;
+    }
+  }
+
+  uint8_t e5 = pct_time_elapsed(usage_5h_reset, 5 * 3600);
+  uint8_t e7 = pct_time_elapsed(usage_7d_reset, 7 * 86400);
+  GColor track = GColorDarkGray;
+  GColor ref   = GColorCyan;
+  int y0 = USAGE_BAR_TOP;
+  int y1 = y0 + USAGE_BAR_H + 1;
+  int y2 = y1 + USAGE_BAR_H + 2;
+  int y3 = y2 + USAGE_BAR_H + 1;
+  draw_usage_bar(ctx, y0, usage_5h_pct, usage_pace_color(usage_5h_pct, e5), track);
+  draw_usage_bar(ctx, y1, e5,           ref,                                track);
+  draw_usage_bar(ctx, y2, usage_7d_pct, usage_pace_color(usage_7d_pct, e7), track);
+  draw_usage_bar(ctx, y3, e7,           ref,                                track);
 
   // stale marker: small dim square at right edge
   if (usage_stale)
