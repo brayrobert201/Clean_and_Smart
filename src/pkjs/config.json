@@ -208,6 +208,105 @@
         "defaultValue": "",
         "description": "From ~/.claude/.credentials.json (claudeAiOauth.accessToken). Read only on your phone to show your /usage limits; never sent to the watch. Leave blank to hide the bars. Note: this token expires periodically and must be re-pasted.",
         "attributes": { "placeholder": "sk-ant-oat...", "type": "text" }
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_USAGE_BAND_MODE",
+        "label": "Band display",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Smart (bars when active)", "value": "0" },
+          { "label": "Always show bars",         "value": "1" },
+          { "label": "Always alternate with date","value": "2" }
+        ]
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_USAGE_DISPLAY_MODE",
+        "label": "Bar style",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Progress bars",     "value": "0" },
+          { "label": "Raw percentages",   "value": "1" }
+        ]
+      },
+      {
+        "type": "slider",
+        "messageKey": "KEY_USAGE_PACE_OFFSET",
+        "label": "Amber when used% exceeds elapsed% by N",
+        "defaultValue": 5,
+        "min": 0,
+        "max": 30,
+        "step": 1
+      },
+      {
+        "type": "slider",
+        "messageKey": "KEY_USAGE_ABS_WARN",
+        "label": "Only warn if used% is at least N (0=always)",
+        "defaultValue": 10,
+        "min": 0,
+        "max": 50,
+        "step": 5
+      },
+      {
+        "type": "color",
+        "messageKey": "KEY_USAGE_COLOR_GOOD",
+        "label": "Bar colour: on-pace",
+        "defaultValue": "00ff00",
+        "sunlight": false,
+        "capabilities": ["COLOR"]
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_USAGE_COLOR_GOOD",
+        "label": "Bar colour: on-pace",
+        "defaultValue": "16777215",
+        "options": [
+          { "label": "White",      "value": "16777215" },
+          { "label": "Light gray", "value": "11184810" },
+          { "label": "Dark gray",  "value": "5592405"  }
+        ],
+        "capabilities": ["BW"]
+      },
+      {
+        "type": "color",
+        "messageKey": "KEY_USAGE_COLOR_OVER",
+        "label": "Bar colour: over-pace",
+        "defaultValue": "ffaa00",
+        "sunlight": false,
+        "capabilities": ["COLOR"]
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_USAGE_COLOR_OVER",
+        "label": "Bar colour: over-pace",
+        "defaultValue": "11184810",
+        "options": [
+          { "label": "White",      "value": "16777215" },
+          { "label": "Light gray", "value": "11184810" },
+          { "label": "Dark gray",  "value": "5592405"  }
+        ],
+        "capabilities": ["BW"]
+      },
+      {
+        "type": "color",
+        "messageKey": "KEY_USAGE_COLOR_CRIT",
+        "label": "Bar colour: critical",
+        "defaultValue": "ff0000",
+        "sunlight": false,
+        "capabilities": ["COLOR"]
+      },
+      {
+        "type": "select",
+        "messageKey": "KEY_USAGE_COLOR_CRIT",
+        "label": "Bar colour: critical",
+        "defaultValue": "5592405",
+        "options": [
+          { "label": "White",      "value": "16777215" },
+          { "label": "Light gray", "value": "11184810" },
+          { "label": "Dark gray",  "value": "5592405"  }
+        ],
+        "capabilities": ["BW"]
       }
     ]
   },

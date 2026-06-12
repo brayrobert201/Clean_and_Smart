@@ -32,6 +32,15 @@
 #define KEY_USAGE_7D_RESET 43
 #define KEY_USAGE_STALE 44
 
+// Claude usage display config (emery face only)
+#define KEY_USAGE_BAND_MODE    36
+#define KEY_USAGE_DISPLAY_MODE 37
+#define KEY_USAGE_PACE_OFFSET  38
+#define KEY_USAGE_ABS_WARN     39
+#define KEY_USAGE_COLOR_GOOD   47
+#define KEY_USAGE_COLOR_OVER   48
+#define KEY_USAGE_COLOR_CRIT   49
+
 #ifdef PBL_RECT
 #define ICON_WIDTH 40
 #define ICON_HEIGHT 20

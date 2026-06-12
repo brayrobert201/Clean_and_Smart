@@ -59,7 +59,14 @@ static bool usage_stale = false;
 static uint32_t usage_last_change = 0;  // epoch when quota pct last changed
 static bool usage_band_shows_bars = false;
 #define PERSIST_USAGE_LAST_CHANGE 46
-#define USAGE_FRESH_SECS 3600           // show bars whenever quota changed in the last hour
+#define USAGE_FRESH_SECS 7200           // show bars whenever quota changed in the last 2 hours
+static uint8_t flag_usage_band_mode    = 0;   // 0=smart, 1=always bars, 2=always alt
+static uint8_t flag_usage_display_mode = 0;   // 0=bars, 1=text pct
+static uint8_t flag_usage_pace_offset  = 5;   // amber gate: used > elapsed + N
+static uint8_t flag_usage_abs_warn     = 10;  // amber gate: used >= N (0=disabled)
+static int     flag_usage_color_good   = 0x00FF00;
+static int     flag_usage_color_over   = 0xFFAA00;
+static int     flag_usage_color_crit   = 0xFF0000;
 static void update_usage_band(void);    // forward declaration (defined near draw_usage)
 #endif
 
@@ -591,11 +598,17 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       need_usage_redraw = 1;
       break;
     }
-    case KEY_USAGE_5H_RESET:
-      usage_5h_reset = t->value->uint32;
+    case KEY_USAGE_5H_RESET: {
+      uint32_t v = t->value->uint32;
+      if (v != usage_5h_reset) {
+        usage_last_change = (uint32_t)time(NULL);
+        persist_write_int(PERSIST_USAGE_LAST_CHANGE, (int32_t)usage_last_change);
+      }
+      usage_5h_reset = v;
       persist_write_int(KEY_USAGE_5H_RESET, (int32_t)usage_5h_reset);
       need_usage_redraw = 1;
       break;
+    }
     case KEY_USAGE_7D_PCT: {
       uint8_t v = t->value->uint8;
       if (v != usage_7d_pct) {
@@ -607,13 +620,54 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
       need_usage_redraw = 1;
       break;
     }
-    case KEY_USAGE_7D_RESET:
-      usage_7d_reset = t->value->uint32;
+    case KEY_USAGE_7D_RESET: {
+      uint32_t v = t->value->uint32;
+      if (v != usage_7d_reset) {
+        usage_last_change = (uint32_t)time(NULL);
+        persist_write_int(PERSIST_USAGE_LAST_CHANGE, (int32_t)usage_last_change);
+      }
+      usage_7d_reset = v;
       persist_write_int(KEY_USAGE_7D_RESET, (int32_t)usage_7d_reset);
       need_usage_redraw = 1;
       break;
+    }
     case KEY_USAGE_STALE:
       usage_stale = t->value->uint8 ? true : false;
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_BAND_MODE:
+      flag_usage_band_mode = t->value->uint8;
+      persist_write_int(KEY_USAGE_BAND_MODE, flag_usage_band_mode);
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_DISPLAY_MODE:
+      flag_usage_display_mode = t->value->uint8;
+      persist_write_int(KEY_USAGE_DISPLAY_MODE, flag_usage_display_mode);
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_PACE_OFFSET:
+      flag_usage_pace_offset = t->value->uint8;
+      persist_write_int(KEY_USAGE_PACE_OFFSET, flag_usage_pace_offset);
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_ABS_WARN:
+      flag_usage_abs_warn = t->value->uint8;
+      persist_write_int(KEY_USAGE_ABS_WARN, flag_usage_abs_warn);
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_COLOR_GOOD:
+      flag_usage_color_good = t->value->int32;
+      persist_write_int(KEY_USAGE_COLOR_GOOD, flag_usage_color_good);
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_COLOR_OVER:
+      flag_usage_color_over = t->value->int32;
+      persist_write_int(KEY_USAGE_COLOR_OVER, flag_usage_color_over);
+      need_usage_redraw = 1;
+      break;
+    case KEY_USAGE_COLOR_CRIT:
+      flag_usage_color_crit = t->value->int32;
+      persist_write_int(KEY_USAGE_COLOR_CRIT, flag_usage_color_crit);
       need_usage_redraw = 1;
       break;
 #endif
@@ -780,8 +834,8 @@ static void bluetooth_handler(bool state)
 // Claude usage lives in the band between the (raised) date and the bottom Bluetooth bar.
 #define USAGE_BAR_X 8
 #define USAGE_BAR_W (PBL_DISPLAY_WIDTH - 2 * USAGE_BAR_X)
-#define USAGE_BAR_TOP 190
-#define USAGE_BAR_H 6
+#define USAGE_BAR_TOP 188
+#define USAGE_BAR_H 8
 
 // fraction (0-100) of a window still remaining before its reset epoch
 static uint8_t pct_time_remaining(uint32_t reset, uint32_t window)
@@ -801,14 +855,16 @@ static uint8_t pct_time_elapsed(uint32_t reset, uint32_t window)
   return 100 - pct_time_remaining(reset, window);
 }
 
-// colour a "used" bar by how it tracks the clock: green under pace, amber over, red critical
+// colour a "used" bar: two-gate — must be BOTH ahead of pace AND past the absolute floor
 static GColor usage_pace_color(uint8_t used, uint8_t elapsed)
 {
   if (used >= 90)
-    return GColorRed; // near the wall regardless of pace
-  if (used > elapsed + 3)
-    return GColorChromeYellow; // burning faster than the clock
-  return GColorGreen;          // on or under pace
+    return GColorFromHEX(flag_usage_color_crit);
+  bool over_pace = used > elapsed + flag_usage_pace_offset;
+  bool past_abs  = (flag_usage_abs_warn == 0) || (used >= flag_usage_abs_warn);
+  if (over_pace && past_abs)
+    return GColorFromHEX(flag_usage_color_over);
+  return GColorFromHEX(flag_usage_color_good);
 }
 
 // decide whether the bottom band shows bars or date, then hide/show text_date accordingly
@@ -816,17 +872,27 @@ static void update_usage_band(void)
 {
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
+  bool no_data = (usage_5h_reset == 0 && usage_7d_reset == 0);
   bool bars;
-  if (usage_5h_reset == 0 && usage_7d_reset == 0)
-    bars = false; // no data yet -> show date
-  else if ((usage_7d_pct >= 100 && usage_7d_reset && (uint32_t)now < usage_7d_reset) ||
-           (usage_5h_pct >= 100 && usage_5h_reset && (uint32_t)now < usage_5h_reset))
-    bars = true;  // limit takeover active (not yet past reset epoch)
-  else if (usage_last_change && (uint32_t)now - usage_last_change < USAGE_FRESH_SECS)
-    bars = true;  // quota changed in the last hour -> show bars
-  else
-    bars = (t->tm_min % 2) == 0; // idle -> alternate per minute
-
+  switch (flag_usage_band_mode) {
+    case 1: // always bars
+      bars = !no_data;
+      break;
+    case 2: // always alternate
+      bars = !no_data && (t->tm_min % 2) == 0;
+      break;
+    default: // 0 = smart
+      if (no_data)
+        bars = false;
+      else if ((usage_7d_pct >= 100 && usage_7d_reset && (uint32_t)now < usage_7d_reset) ||
+               (usage_5h_pct >= 100 && usage_5h_reset && (uint32_t)now < usage_5h_reset))
+        bars = true;  // limit takeover active
+      else if (usage_last_change && (uint32_t)now - usage_last_change < USAGE_FRESH_SECS)
+        bars = true;  // usage seen recently -> stay on bars
+      else
+        bars = (t->tm_min % 2) == 0; // idle -> alternate per minute
+      break;
+  }
   usage_band_shows_bars = bars;
   layer_set_hidden(text_layer_get_layer(text_date), bars);
   layer_mark_dirty(graphics_layer);
@@ -891,21 +957,36 @@ static void draw_usage(GContext *ctx)
 
   // normal: four taller bars in two pairs. Used (pace-coloured) above elapsed (cyan = clock).
   // Used bar longer than cyan bar below = burning faster than the clock.
-  GColor track = GColorDarkGray;
-  GColor ref   = GColorCyan;
-
   uint8_t e5 = pct_time_elapsed(usage_5h_reset, 5 * 3600);
   uint8_t e7 = pct_time_elapsed(usage_7d_reset, 7 * 86400);
 
-  int y0 = USAGE_BAR_TOP;                         // 5h used
-  int y1 = y0 + USAGE_BAR_H + 1;                  // 5h elapsed (1px intra-pair gap)
-  int y2 = y1 + USAGE_BAR_H + 5;                  // wk used   (5px inter-group gap)
-  int y3 = y2 + USAGE_BAR_H + 1;                  // wk elapsed
-
-  draw_usage_bar(ctx, y0, usage_5h_pct, usage_pace_color(usage_5h_pct, e5), track);
-  draw_usage_bar(ctx, y1, e5,           ref,                                track);
-  draw_usage_bar(ctx, y2, usage_7d_pct, usage_pace_color(usage_7d_pct, e7), track);
-  draw_usage_bar(ctx, y3, e7,           ref,                                track);
+  if (flag_usage_display_mode == 1)
+  {
+    // text mode: raw percentages side-by-side
+    static char b5[10], b7[10];
+    snprintf(b5, sizeof(b5), "5h:%d%%", (int)usage_5h_pct);
+    snprintf(b7, sizeof(b7), "Wk:%d%%", (int)usage_7d_pct);
+    int hw = USAGE_BAR_W / 2;
+    graphics_context_set_text_color(ctx, text_col);
+    graphics_draw_text(ctx, b5, bn_19, GRect(USAGE_BAR_X, USAGE_BAR_TOP, hw, 30),
+                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    graphics_draw_text(ctx, b7, bn_19, GRect(USAGE_BAR_X + hw, USAGE_BAR_TOP, hw, 30),
+                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  }
+  else
+  {
+    // bars mode: four taller bars in two pairs (8px each, y3 ends at 224)
+    GColor track = GColorDarkGray;
+    GColor ref   = GColorCyan;
+    int y0 = USAGE_BAR_TOP;                        // 5h used
+    int y1 = y0 + USAGE_BAR_H + 1;                 // 5h elapsed
+    int y2 = y1 + USAGE_BAR_H + 2;                 // wk used   (2px inter-group gap)
+    int y3 = y2 + USAGE_BAR_H + 1;                 // wk elapsed (ends y=224)
+    draw_usage_bar(ctx, y0, usage_5h_pct, usage_pace_color(usage_5h_pct, e5), track);
+    draw_usage_bar(ctx, y1, e5,           ref,                                track);
+    draw_usage_bar(ctx, y2, usage_7d_pct, usage_pace_color(usage_7d_pct, e7), track);
+    draw_usage_bar(ctx, y3, e7,           ref,                                track);
+  }
 
   // stale marker: small dim square at right edge
   if (usage_stale)
@@ -1187,6 +1268,13 @@ void handle_init(void)
   if (persist_exists(KEY_USAGE_7D_PCT))   usage_7d_pct   = persist_read_int(KEY_USAGE_7D_PCT);
   if (persist_exists(KEY_USAGE_7D_RESET)) usage_7d_reset = (uint32_t)persist_read_int(KEY_USAGE_7D_RESET);
   if (persist_exists(PERSIST_USAGE_LAST_CHANGE)) usage_last_change = (uint32_t)persist_read_int(PERSIST_USAGE_LAST_CHANGE);
+  if (persist_exists(KEY_USAGE_BAND_MODE))    flag_usage_band_mode    = persist_read_int(KEY_USAGE_BAND_MODE);
+  if (persist_exists(KEY_USAGE_DISPLAY_MODE)) flag_usage_display_mode = persist_read_int(KEY_USAGE_DISPLAY_MODE);
+  if (persist_exists(KEY_USAGE_PACE_OFFSET))  flag_usage_pace_offset  = persist_read_int(KEY_USAGE_PACE_OFFSET);
+  if (persist_exists(KEY_USAGE_ABS_WARN))     flag_usage_abs_warn     = persist_read_int(KEY_USAGE_ABS_WARN);
+  if (persist_exists(KEY_USAGE_COLOR_GOOD))   flag_usage_color_good   = persist_read_int(KEY_USAGE_COLOR_GOOD);
+  if (persist_exists(KEY_USAGE_COLOR_OVER))   flag_usage_color_over   = persist_read_int(KEY_USAGE_COLOR_OVER);
+  if (persist_exists(KEY_USAGE_COLOR_CRIT))   flag_usage_color_crit   = persist_read_int(KEY_USAGE_COLOR_CRIT);
   usage_stale = true;
 #endif
 

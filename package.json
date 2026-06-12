@@ -47,7 +47,14 @@
             "KEY_USAGE_7D_PCT": 42,
             "KEY_USAGE_7D_RESET": 43,
             "KEY_USAGE_STALE": 44,
-            "KEY_CLAUDE_TOKEN": 45
+            "KEY_CLAUDE_TOKEN": 45,
+            "KEY_USAGE_BAND_MODE": 36,
+            "KEY_USAGE_DISPLAY_MODE": 37,
+            "KEY_USAGE_PACE_OFFSET": 38,
+            "KEY_USAGE_ABS_WARN": 39,
+            "KEY_USAGE_COLOR_GOOD": 47,
+            "KEY_USAGE_COLOR_OVER": 48,
+            "KEY_USAGE_COLOR_CRIT": 49
         },
         "projectType": "native",
         "resources": {
